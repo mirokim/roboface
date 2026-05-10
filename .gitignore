@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Data / logs
+src/data/*.db
+src/data/*.json
+logs/
+*.log
+
+# OS
+Thumbs.db
+
+# Build outputs
+*.tflite
+*.rpk
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Memory (gitignored - personal)
+memory/
+.megamemory/

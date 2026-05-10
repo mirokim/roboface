@@ -1,0 +1,24 @@
+# Pi 5 전용 (Linux + 하드웨어). PC에서는 설치 불가.
+-r requirements.txt
+
+# GPIO / SPI / I2C
+gpiozero>=2.0
+lgpio>=0.2.2.0
+spidev>=3.6
+smbus2>=0.4.3
+
+# 디스플레이 / 서보
+adafruit-circuitpython-st7789>=1.5.0   # 2.4" LCD ILI9341 호환 라이브러리도 동일 패턴
+adafruit-circuitpython-servokit>=1.3.0 # PCA9685 + 서보
+
+# 센서
+adafruit-circuitpython-dht>=4.0.0
+pyserial>=3.5                          # mmWave UART
+
+# 카메라
+picamera2>=0.3.20
+opencv-python>=4.9.0
+
+# AI (선택, 무거움)
+# whisper-cpp-python>=0.1.0            # 로컬 STT
+# piper-tts>=1.2.0                     # 로컬 TTS

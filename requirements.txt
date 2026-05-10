@@ -1,0 +1,15 @@
+# Core (PC + Pi 공통)
+pygame>=2.5.0          # 얼굴 시뮬레이터 / LCD 렌더
+numpy>=1.24.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# HTTP / 통합
+httpx>=0.27.0          # ThinkTank API 비동기 호출
+anthropic>=0.40.0      # Claude API
+
+# 데이터
+sqlalchemy>=2.0.0      # 작업 시간 / 메모리
+
+# 로깅 / 개발
+loguru>=0.7.0
