@@ -13,9 +13,22 @@ import random
 from dataclasses import dataclass
 
 import pygame
+import pygame.gfxdraw
 
 from src.config import BEHAVIOR, COLOR_BG, COLOR_EYE, LINE_THICK
 from src.face.expressions import EyeShape
+
+
+def _aa_filled_circle(surface: pygame.Surface, x: int, y: int, r: int, color) -> None:
+    """안티앨리어싱된 채워진 원 — gfxdraw 두 함수 조합."""
+    pygame.gfxdraw.filled_circle(surface, x, y, r, color)
+    pygame.gfxdraw.aacircle(surface, x, y, r, color)
+
+
+def _aa_filled_polygon(surface: pygame.Surface, pts, color) -> None:
+    """안티앨리어싱된 채워진 폴리곤."""
+    pygame.gfxdraw.filled_polygon(surface, pts, color)
+    pygame.gfxdraw.aapolygon(surface, pts, color)
 
 
 @dataclass
@@ -256,39 +269,43 @@ def _angle(
 
 
 def _heart(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """단순 채워진 하트."""
+    """채워진 하트 — 좁은 lobe 간격 + 삼각형 본체 (AA)."""
     s = size // 2
     cx, cy = center
-    pygame.draw.circle(surface, COLOR_EYE, (cx - s // 2, cy - s // 4), s // 2)
-    pygame.draw.circle(surface, COLOR_EYE, (cx + s // 2, cy - s // 4), s // 2)
-    pygame.draw.polygon(surface, COLOR_EYE, [
-        (cx - s, cy - s // 8),
-        (cx + s, cy - s // 8),
+    lobe_r = s // 2                # 원 반지름
+    lobe_dx = int(s * 0.35)        # 원 중심이 cx로부터 떨어진 거리 (이전 s/2=0.5에서 감소)
+    base_half = lobe_dx + lobe_r   # 삼각형 밑변이 lobe 가장자리에 맞춰짐
+    # 본체: 삼각형 (AA)
+    triangle_pts = [
+        (cx - base_half, cy - s // 4),
+        (cx + base_half, cy - s // 4),
         (cx, cy + s),
-    ])
+    ]
+    _aa_filled_polygon(surface, triangle_pts, COLOR_EYE)
+    # 두 lobe — 살짝 겹치게 (V 작게)
+    _aa_filled_circle(surface, cx - lobe_dx, cy - s // 4, lobe_r, COLOR_EYE)
+    _aa_filled_circle(surface, cx + lobe_dx, cy - s // 4, lobe_r, COLOR_EYE)
 
 
 def _star(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """5각 별."""
+    """5각 별 (AA)."""
     cx, cy = center
     outer_r = size // 2
     inner_r = outer_r * 0.4
-    points: list[tuple[float, float]] = []
+    points: list[tuple[int, int]] = []
     for i in range(10):
         angle = -math.pi / 2 + i * math.pi / 5
         r = outer_r if i % 2 == 0 else inner_r
-        points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
-    pygame.draw.polygon(surface, COLOR_EYE, points)
+        points.append((int(cx + r * math.cos(angle)), int(cy + r * math.sin(angle))))
+    _aa_filled_polygon(surface, points, COLOR_EYE)
 
 
 def _dizzy(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """소용돌이 — 동심원 두 개 + X 표시. 깔끔한 링 기법."""
+    """소용돌이 — 동심원 + X (AA 적용)."""
     cx, cy = center
     r_outer = size // 2
-    # 외곽 채움 → 내부 펀칭으로 깔끔한 링
-    pygame.draw.circle(surface, COLOR_EYE, (cx, cy), r_outer)
-    pygame.draw.circle(surface, COLOR_BG, (cx, cy), r_outer - LINE_THICK)
-    # X 표시
+    _aa_filled_circle(surface, cx, cy, r_outer, COLOR_EYE)
+    _aa_filled_circle(surface, cx, cy, r_outer - LINE_THICK, COLOR_BG)
     half = r_outer // 2
     pygame.draw.line(
         surface, COLOR_EYE,

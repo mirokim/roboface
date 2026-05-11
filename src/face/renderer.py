@@ -93,7 +93,8 @@ class PygameRenderer:
         if face.brightness < 0.05:
             canvas.fill((0, 0, 0))
 
-        scaled = pygame.transform.scale(canvas, self.size)
+        # smoothscale로 확대 시 안티앨리어싱 적용 (jaggies 완화)
+        scaled = pygame.transform.smoothscale(canvas, self.size)
         self.window.blit(scaled, (0, 0))
         pygame.display.flip()
         self.clock.tick(FPS)
