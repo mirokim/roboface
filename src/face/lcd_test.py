@@ -48,12 +48,21 @@ def main() -> None:
     disp = _open_lcd()
     print(f"LCD OK — {disp.width}×{disp.height}")
 
+    # rotation=90이라 이미지 크기는 LANDSCAPE (디스플레이 native와 swap)
+    # disp.width/height는 native(portrait) 값 그대로 반환됨
+    if disp.rotation in (90, 270):
+        img_w, img_h = disp.height, disp.width   # 320, 240
+    else:
+        img_w, img_h = disp.width, disp.height
+
+    print(f"이미지 크기: {img_w}×{img_h} (rotation={disp.rotation})")
+
     # 1. RGB 컬러 테스트
     for color_name, rgb in [("RED", (255, 0, 0)), ("GREEN", (0, 255, 0)),
                               ("BLUE", (0, 0, 255)), ("WHITE", (255, 255, 255)),
                               ("BLACK", (0, 0, 0))]:
         print(f"  → {color_name}")
-        img = Image.new("RGB", (disp.width, disp.height), rgb)
+        img = Image.new("RGB", (img_w, img_h), rgb)
         disp.image(img)
         time.sleep(0.8)
 
