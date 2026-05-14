@@ -26,6 +26,7 @@ from src.tasks.ambient_listener import AmbientListener
 from src.tasks.idle_animation import run_idle_gaze
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
+from src.tasks.vision_task import run_vision
 from src.tasks.work_tracker import WorkTracker
 from src.utils.logger import get_logger
 import time
@@ -71,6 +72,11 @@ async def run_robot() -> None:
         asyncio.create_task(
             run_proactive(ctx, face, lambda: work_tracker.current_session_id),
             name="proactive",
+        ),
+        # AI Camera person detection — sensor manager의 events 큐에 직접 push
+        asyncio.create_task(
+            run_vision(lambda ev: sensors.events.append(ev)),
+            name="vision",
         ),
     ]
 
