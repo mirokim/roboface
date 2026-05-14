@@ -43,8 +43,9 @@ class LCDRenderer:
         from adafruit_rgb_display import ili9341
         from PIL import Image  # noqa: F401  (간접 사용 확인)
 
-        # 핀 매핑
-        cs_pin = digitalio.DigitalInOut(board.CE0)
+        # 핀 매핑 — Pi 5는 CE0(GPIO8)이 spidev 드라이버에 점유되어
+        # digitalio로 못 잡음. CS는 free GPIO (GPIO 5)로 우회.
+        cs_pin = digitalio.DigitalInOut(board.D5)
         dc_pin = digitalio.DigitalInOut(board.D25)
         rst_pin = digitalio.DigitalInOut(board.D27)
         spi = board.SPI()

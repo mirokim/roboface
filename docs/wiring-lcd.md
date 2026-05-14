@@ -10,7 +10,7 @@
 | **GND** | 그라운드 | — | `GND` | 6/9/etc |
 | **DIN** | SPI MOSI (데이터) | GPIO 10 | `MOSI` 또는 `G10` | 19 |
 | **CLK** | SPI 클럭 | GPIO 11 | `SCLK` 또는 `G11` | 23 |
-| **CS** | Chip Select | GPIO 8 (CE0) | `CE0` 또는 `G8` | 24 |
+| **CS** | Chip Select | **GPIO 5** ⚠️ | `GPIO5` 또는 `G5` | 29 |
 | **DC** | Data/Command | GPIO 25 | `G25` | 22 |
 | **RST** | Reset | GPIO 27 | `G27` | 13 |
 | **BL** | Backlight | GPIO 18 | `G18` | 12 |
@@ -20,7 +20,8 @@
 ## 결선 시 주의
 
 1. **VCC는 3.3V** — 5V 가도 동작은 하지만 일부 모듈은 손상 가능. 3.3V 권장.
-2. **CS는 반드시 CE0(GPIO 8)** — Pi의 SPI0 첫 번째 chip select.
+2. **CS는 GPIO 5 사용** — Pi 5에서 CE0(GPIO 8)은 spidev 드라이버가 점유해서
+   digitalio로 잡으면 "GPIO busy" 에러. GPIO 5는 free하고 가까이 있음.
 3. **점퍼선 색 권장**:
    - VCC: 빨강
    - GND: 검정

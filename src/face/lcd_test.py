@@ -26,7 +26,8 @@ def _open_lcd():
     import digitalio
     from adafruit_rgb_display import ili9341
 
-    cs_pin = digitalio.DigitalInOut(board.CE0)
+    # CS는 GPIO 5 사용 (Pi 5에서 CE0 점유 충돌 회피)
+    cs_pin = digitalio.DigitalInOut(board.D5)
     dc_pin = digitalio.DigitalInOut(board.D25)
     rst_pin = digitalio.DigitalInOut(board.D27)
     bl_pin = digitalio.DigitalInOut(board.D18)
