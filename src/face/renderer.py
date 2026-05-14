@@ -38,6 +38,52 @@ class FaceState:
             eyes.trigger_blink(self.eye_state, time.time())
 
 
+def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
+    """얼굴 한 프레임을 surface에 그림. PygameRenderer와 LCDRenderer 공용.
+
+    canvas는 (DISPLAY_WIDTH, DISPLAY_HEIGHT) 크기.
+    """
+    now = time.time()
+    eyes.update_blink(face.eye_state, now)
+
+    bg = tuple(int(c * face.brightness) for c in COLOR_BG)
+    canvas.fill(bg)
+
+    # === 얼굴 위치 동적 계산 ===
+    eye_size = 56
+    eye_offset = int(DISPLAY_WIDTH * 0.20)
+
+    eye_extent_above = eye_size // 2
+    eye_extent_below = eyes.eye_extent_below(face.expression.eye, eye_size)
+    gap = max(eye_extent_below, eye_size // 3) + 10
+    mouth_estimated_below = 12
+
+    face_block_height = eye_extent_above + gap + mouth_estimated_below
+    face_top = (DISPLAY_HEIGHT - face_block_height) // 2
+    eye_y = face_top + eye_extent_above
+    mouth_y = eye_y + gap
+
+    left_eye = (DISPLAY_WIDTH // 2 - eye_offset, eye_y)
+    right_eye = (DISPLAY_WIDTH // 2 + eye_offset, eye_y)
+
+    eyes.draw_eyes(canvas, face.eye_state, left_eye, right_eye, size=eye_size)
+
+    mouth_center = (DISPLAY_WIDTH // 2, mouth_y)
+    mouth.draw_mouth(canvas, face.mouth_state, mouth_center, width=50)
+
+    # 녹음 인디케이터
+    if face.recording:
+        t = (now * 2) % 1.0
+        alpha = int(80 + 175 * abs(0.5 - t) * 2)
+        color = (*COLOR_INDICATOR_REC[:3], alpha)
+        indicator = pygame.Surface((12, 12), pygame.SRCALPHA)
+        pygame.draw.circle(indicator, color, (6, 6), 6)
+        canvas.blit(indicator, (DISPLAY_WIDTH - 18, 6))
+
+    if face.brightness < 0.05:
+        canvas.fill((0, 0, 0))
+
+
 class PygameRenderer:
     """Pygame 창에 얼굴 그리는 렌더러 (PC simulator)."""
 
@@ -51,50 +97,9 @@ class PygameRenderer:
         self.canvas = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT))
 
     def render(self, face: FaceState) -> None:
-        now = time.time()
-        eyes.update_blink(face.eye_state, now)
-
-        canvas = self.canvas
-        bg = tuple(int(c * face.brightness) for c in COLOR_BG)
-        canvas.fill(bg)
-
-        # === 얼굴 위치 동적 계산 ===
-        eye_size = 56
-        eye_offset = int(DISPLAY_WIDTH * 0.20)
-
-        # 표정마다 눈/입 차지 영역이 다름 → 전체 블록을 화면 중앙에 정렬
-        eye_extent_above = eye_size // 2   # 대부분 모양에서 위쪽 반지름은 ~half
-        eye_extent_below = eyes.eye_extent_below(face.expression.eye, eye_size)
-        gap = max(eye_extent_below, eye_size // 3) + 10  # 눈 중심 → 입 중심
-        mouth_estimated_below = 12  # 입 중심에서 아래로 차지하는 평균
-
-        face_block_height = eye_extent_above + gap + mouth_estimated_below
-        face_top = (DISPLAY_HEIGHT - face_block_height) // 2
-        eye_y = face_top + eye_extent_above
-        mouth_y = eye_y + gap
-
-        left_eye = (DISPLAY_WIDTH // 2 - eye_offset, eye_y)
-        right_eye = (DISPLAY_WIDTH // 2 + eye_offset, eye_y)
-
-        eyes.draw_eyes(canvas, face.eye_state, left_eye, right_eye, size=eye_size)
-
-        mouth_center = (DISPLAY_WIDTH // 2, mouth_y)
-        mouth.draw_mouth(canvas, face.mouth_state, mouth_center, width=50)
-
-        # 녹음 인디케이터
-        if face.recording:
-            t = (now * 2) % 1.0
-            alpha = int(80 + 175 * abs(0.5 - t) * 2)
-            color = (*COLOR_INDICATOR_REC[:3], alpha)
-            indicator = pygame.Surface((12, 12), pygame.SRCALPHA)
-            pygame.draw.circle(indicator, color, (6, 6), 6)
-            canvas.blit(indicator, (DISPLAY_WIDTH - 18, 6))
-
-        if face.brightness < 0.05:
-            canvas.fill((0, 0, 0))
-
+        draw_face_to_surface(self.canvas, face)
         # smoothscale로 확대 시 안티앨리어싱 적용 (jaggies 완화)
-        scaled = pygame.transform.smoothscale(canvas, self.size)
+        scaled = pygame.transform.smoothscale(self.canvas, self.size)
         self.window.blit(scaled, (0, 0))
         pygame.display.flip()
         self.clock.tick(FPS)

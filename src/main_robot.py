@@ -35,12 +35,20 @@ log = get_logger("main_robot")
 
 async def run_robot() -> None:
     log.info("=== Roboface (robot mode) 시작 ===")
-    log.info("LCD 렌더러 미통합 — 표정 상태는 로그로만 출력")
 
     memory.init_db()
 
     face = FaceState(expression=NEUTRAL)
     ctx = StateContext()
+
+    # LCD 렌더러 시도 — 실패하면 헤드리스 모드
+    lcd = None
+    try:
+        from src.face.lcd_renderer import LCDRenderer
+        lcd = LCDRenderer()
+    except Exception as e:
+        log.warning(f"LCD 초기화 실패 (헤드리스 모드로 전환): {e}")
+        lcd = None
 
     sensors = SensorManager()
     sensors.register_default()
@@ -84,11 +92,13 @@ async def run_robot() -> None:
             signal.signal(sig, _request_stop)
 
     try:
-        # 메인 루프: 센서 이벤트 처리 + 상태 머신 운영
+        # 메인 루프: 센서 이벤트 처리 + LCD 렌더 + 상태 머신
         while not stop_event.is_set():
             for ev in sensors.drain_events():
                 _handle_sensor_event(ev, ctx, face, work_tracker)
-            await asyncio.sleep(0.1)
+            if lcd is not None:
+                lcd.render(face)
+            await asyncio.sleep(0.033)  # ~30 FPS
     finally:
         log.info("종료 중...")
         for t in bg_tasks:
@@ -99,6 +109,8 @@ async def run_robot() -> None:
             except asyncio.CancelledError:
                 pass
         sensors.close()
+        if lcd is not None:
+            lcd.close()
         log.info("종료 완료")
 
 
