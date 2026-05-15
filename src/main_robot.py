@@ -13,16 +13,18 @@ import signal
 import sys
 
 from src.brain import memory
+from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import is_robot
 from src.face.expressions import NEUTRAL
-from src.face.renderer import FaceState   # state container만 사용
+from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
 from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
 from src.tasks import journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
+from src.tasks.head_tracker import run_head_tracker
 from src.tasks.idle_animation import run_idle_gaze
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
@@ -54,6 +56,14 @@ async def run_robot() -> None:
     sensors = SensorManager()
     sensors.register_default()
 
+    perception = PerceptionState()
+    servos = create_servos()
+    # 시작 시 머리 중앙 정렬
+    try:
+        servos.home()
+    except Exception as e:
+        log.warning(f"서보 home 실패: {e}")
+
     work_tracker = WorkTracker()
     posture = PostureMonitor()
     ambient = AmbientListener()
@@ -70,17 +80,20 @@ async def run_robot() -> None:
                             name="schedule_sync"),
         asyncio.create_task(run_queue_flusher(), name="queue_flusher"),
         asyncio.create_task(
-            run_proactive(ctx, face, lambda: work_tracker.current_session_id),
+            run_proactive(ctx, face, lambda: work_tracker.current_session_id, servos=servos),
             name="proactive",
         ),
-        # AI Camera person detection — sensor manager의 events 큐에 직접 push
+        # AI Camera person detection + perception 업데이트
         asyncio.create_task(
-            run_vision(lambda ev: sensors.events.append(ev)),
+            run_vision(lambda ev: sensors.events.append(ev), perception),
             name="vision",
         ),
+        # 얼굴 추적 — 서보로 머리 회전
+        asyncio.create_task(
+            run_head_tracker(servos, perception, ctx),
+            name="head_tracker",
+        ),
     ]
-
-    _ = create_servos()  # PCA9685 (실패 시 Mock 폴백)
 
     # 시그널 핸들러로 graceful shutdown
     stop_event = asyncio.Event()

@@ -56,19 +56,36 @@ class ServoController(ABC):
         self.set_angles(new_pan, new_tilt)
 
     def smooth_to(self, pan: float, tilt: float, duration_sec: float = 0.5) -> None:
-        """부드럽게 보간 이동 (블로킹). 비동기 버전은 추후."""
+        """부드럽게 보간 이동 (블로킹). asyncio 환경에선 smooth_to_async 사용."""
         steps = max(2, int(duration_sec * 30))
         start_pan = self.position.pan
         start_tilt = self.position.tilt
         for i in range(1, steps + 1):
             t = i / steps
-            # ease-in-out
             t = t * t * (3 - 2 * t)
             self.set_angles(
                 start_pan + (pan - start_pan) * t,
                 start_tilt + (tilt - start_tilt) * t,
             )
             time.sleep(duration_sec / steps)
+
+    async def smooth_to_async(
+        self, pan: float, tilt: float, duration_sec: float = 0.5,
+    ) -> None:
+        """async 버전 — 이벤트 루프 블로킹 X."""
+        import asyncio
+        steps = max(2, int(duration_sec * 30))
+        start_pan = self.position.pan
+        start_tilt = self.position.tilt
+        period = duration_sec / steps
+        for i in range(1, steps + 1):
+            t = i / steps
+            t = t * t * (3 - 2 * t)
+            self.set_angles(
+                start_pan + (pan - start_pan) * t,
+                start_tilt + (tilt - start_tilt) * t,
+            )
+            await asyncio.sleep(period)
 
 
 class MockServoController(ServoController):
