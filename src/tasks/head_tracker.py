@@ -58,6 +58,8 @@ async def run_head_tracker(
         # 다른 task가 서보를 점유 중이면 양보
         if ctx.state in (State.TALKING, State.GREETING, State.LISTENING):
             continue
+        if ctx.ambient_motion_active:
+            continue
 
         # 타겟 각도 계산
         if perception.person_present:

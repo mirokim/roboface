@@ -151,3 +151,46 @@ async def dance(
         face.apply_expression(saved_expr)
         # 머리 중앙으로
         await servos.smooth_to_async(PAN_CENTER_DEG, TILT_CENTER_DEG, 0.4)
+
+
+async def sway(
+    servos: ServoController,
+    *,
+    bpm: int = 70,
+    beats: int = 4,
+    pan_amp_deg: float = 10.0,
+    tilt_amp_deg: float = 3.0,
+    update_hz: int = 25,
+) -> None:
+    """은은한 살랑살랑 — 표정/입은 건드리지 않음. ambient 백그라운드용.
+
+    dance보다 진폭/속도 작고, beats도 짧음. envelope으로 자연스럽게 진입/종료.
+    """
+    log.debug(f"sway: {bpm} BPM × {beats} beats")
+    period = 60.0 / bpm
+    total = period * beats
+    dt = 1.0 / update_hz
+
+    # 살짝 다양화 — 매 호출마다 위상 다르게
+    phase_offset = random.uniform(0, 2 * math.pi)
+    pan_amp = pan_amp_deg * random.uniform(0.7, 1.0)
+    tilt_amp = tilt_amp_deg * random.uniform(0.5, 1.0)
+
+    start = time.monotonic()
+    try:
+        while True:
+            t = time.monotonic() - start
+            if t > total:
+                break
+            phase = (t / period) * 2 * math.pi + phase_offset
+            env = min(1.0, t / period) * min(1.0, (total - t) / period)
+            env = max(0.0, env)
+            d_pan = math.sin(phase) * pan_amp * env
+            d_tilt = math.sin(phase * 1.5 + math.pi / 2) * tilt_amp * env
+            servos.set_angles(
+                PAN_CENTER_DEG + d_pan,
+                TILT_CENTER_DEG + d_tilt,
+            )
+            await asyncio.sleep(dt)
+    finally:
+        await servos.smooth_to_async(PAN_CENTER_DEG, TILT_CENTER_DEG, 0.3)

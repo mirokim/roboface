@@ -25,7 +25,7 @@ from src.sensors.manager import SensorManager
 from src.tasks import journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
 from src.tasks.head_tracker import run_head_tracker
-from src.tasks.idle_animation import run_idle_gaze
+from src.tasks.idle_animation import run_ambient_motion, run_idle_gaze
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
 from src.tasks.vision_task import run_vision
@@ -74,6 +74,7 @@ async def run_robot() -> None:
     bg_tasks = [
         asyncio.create_task(sensors.run(), name="sensors"),
         asyncio.create_task(run_idle_gaze(face), name="idle_gaze"),
+        asyncio.create_task(run_ambient_motion(servos, ctx), name="ambient_motion"),
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
         asyncio.create_task(ambient.run(), name="ambient"),

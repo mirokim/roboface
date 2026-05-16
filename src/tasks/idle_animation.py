@@ -8,8 +8,11 @@ from __future__ import annotations
 import asyncio
 import random
 
+from src.brain.state_machine import State, StateContext
 from src.config import BEHAVIOR
 from src.face.renderer import FaceState
+from src.motion import poses
+from src.motion.servos import ServoController
 from src.utils.logger import get_logger
 
 log = get_logger("idle_anim")
@@ -38,3 +41,67 @@ async def run_idle_gaze(face: FaceState) -> None:
         # 다시 정면으로
         face.eye_state.gaze_x = 0.0
         face.eye_state.gaze_y = 0.0
+
+
+# === Ambient motion (백그라운드 미세 댄스) ===
+# 평소에 가끔 살랑살랑 — "살아있는 느낌". 대화/알림 중이면 양보.
+# 사람이 보이면 짧고 작게, 안 보이면 좀 더 길고 크게.
+
+_AMBIENT_MIN_INTERVAL_SEC = 20.0
+_AMBIENT_MAX_INTERVAL_SEC = 60.0
+
+# 가끔(12%) bpm/진폭 키워 "신난 살랑이"
+_AMBIENT_LIVELY_PROB = 0.12
+
+# 동작 막아야 하는 상태들 (대화/발화/알림 중엔 sway 금지)
+_BLOCKED_STATES = (
+    State.TALKING,
+    State.LISTENING,
+    State.GREETING,
+    State.ALERTING,
+)
+
+
+async def run_ambient_motion(
+    servos: ServoController,
+    ctx: StateContext,
+) -> None:
+    """평상시 가끔 sway 모션 발동.
+
+    - state가 _BLOCKED_STATES면 skip
+    - 사용자 있을 때: 짧고 작은 sway (1-2 beats, 진폭 절반) — 곁눈질 같은 느낌
+    - 사용자 없을 때: 좀 더 자유롭게 (2-4 beats, 일반 진폭)
+    """
+    log.info("ambient motion 시작")
+    while True:
+        wait = random.uniform(_AMBIENT_MIN_INTERVAL_SEC, _AMBIENT_MAX_INTERVAL_SEC)
+        await asyncio.sleep(wait)
+
+        if ctx.state in _BLOCKED_STATES:
+            continue
+
+        # 사용자가 있으면 head_tracker를 너무 길게 끊지 않게 짧고 작게
+        if ctx.user_present:
+            params = dict(
+                bpm=random.randint(65, 90),
+                beats=random.choice([1, 2]),
+                pan_amp_deg=random.uniform(4.0, 8.0),
+                tilt_amp_deg=random.uniform(1.5, 3.5),
+            )
+        elif random.random() < _AMBIENT_LIVELY_PROB:
+            params = dict(bpm=110, beats=6, pan_amp_deg=18.0, tilt_amp_deg=6.0)
+        else:
+            params = dict(
+                bpm=random.randint(55, 80),
+                beats=random.choice([2, 3, 4]),
+                pan_amp_deg=random.uniform(6.0, 13.0),
+                tilt_amp_deg=random.uniform(2.0, 5.0),
+            )
+
+        ctx.ambient_motion_active = True
+        try:
+            await poses.sway(servos, **params)
+        except Exception as e:
+            log.warning(f"sway 에러: {e}")
+        finally:
+            ctx.ambient_motion_active = False

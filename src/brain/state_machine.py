@@ -29,6 +29,8 @@ class StateContext:
     last_user_seen_at: float | None = None
     last_proactive_at: float | None = None
     user_present: bool = False
+    # ambient_motion이 서보를 점유 중일 때 True — head_tracker가 양보.
+    ambient_motion_active: bool = False
 
     def transition(self, new_state: State, face: FaceState) -> None:
         if new_state == self.state:
