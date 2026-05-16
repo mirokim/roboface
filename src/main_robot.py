@@ -29,6 +29,7 @@ from src.tasks.idle_animation import run_idle_gaze
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
 from src.tasks.vision_task import run_vision
+from src.tasks.voice_assistant import run_voice_assistant
 from src.tasks.work_tracker import WorkTracker
 from src.utils.logger import get_logger
 import time
@@ -92,6 +93,11 @@ async def run_robot() -> None:
         asyncio.create_task(
             run_head_tracker(servos, perception, ctx),
             name="head_tracker",
+        ),
+        # 음성 어시스턴트 — wake word → STT → Claude → TTS
+        asyncio.create_task(
+            run_voice_assistant(ctx, face),
+            name="voice_assistant",
         ),
     ]
 

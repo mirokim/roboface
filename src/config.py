@@ -72,6 +72,21 @@ DHT22_GPIO = 22
 MMWAVE_UART = "/dev/serial0"
 MMWAVE_BAUDRATE = 115200
 
+# === 음성 (STT/TTS/Wake word) ===
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
+PORCUPINE_KEYWORD = os.getenv("PORCUPINE_KEYWORD", "jarvis")
+PORCUPINE_KEYWORD_PATH = os.getenv("PORCUPINE_KEYWORD_PATH", "") or None
+AUDIO_INPUT_DEVICE_RAW = os.getenv("AUDIO_INPUT_DEVICE", "")
+# 숫자면 int, 문자열이면 그대로 (sounddevice가 이름 부분 매칭 지원)
+AUDIO_INPUT_DEVICE: int | str | None
+if AUDIO_INPUT_DEVICE_RAW == "":
+    AUDIO_INPUT_DEVICE = None
+elif AUDIO_INPUT_DEVICE_RAW.lstrip("-").isdigit():
+    AUDIO_INPUT_DEVICE = int(AUDIO_INPUT_DEVICE_RAW)
+else:
+    AUDIO_INPUT_DEVICE = AUDIO_INPUT_DEVICE_RAW
+
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 응답 빠르고 저렴
