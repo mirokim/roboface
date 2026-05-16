@@ -101,10 +101,13 @@ class IMX500Camera:
     def __init__(
         self,
         model_path: str | None = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float | None = None,
         target_fps: float = 5.0,
         mode: str = "detect",
     ):
+        # pose 모드는 보통 0.3 정도가 적절 (공식 데모 기본값)
+        if confidence_threshold is None:
+            confidence_threshold = 0.3 if mode == "pose" else 0.5
         if mode not in ("detect", "pose"):
             raise ValueError(f"mode는 'detect' 또는 'pose' (got '{mode}')")
         if model_path is None:
@@ -209,12 +212,18 @@ class IMX500Camera:
     POSE_IMG_H = 480
     POSE_IMG_W = 640
 
+    _pose_diag_last = 0.0
+
     def _get_pose_detections(self, metadata: dict) -> list[Detection]:
         """HigherHRNet 출력 → 17 keypoint per detected person."""
         import numpy as np
 
         outputs = self.imx500.get_outputs(metadata, add_batch=True)
         if outputs is None:
+            now = time.time()
+            if now - self._pose_diag_last > 5.0:
+                self._pose_diag_last = now
+                log.debug("pose: get_outputs 결과 None")
             return []
 
         try:
@@ -229,6 +238,13 @@ class IMX500Camera:
         except Exception as e:
             log.debug(f"pose postprocess 실패: {e}")
             return []
+
+        # 5초마다 한 번 현재 상태 진단
+        now = time.time()
+        if now - self._pose_diag_last > 5.0:
+            self._pose_diag_last = now
+            sc_count = 0 if scores is None else len(scores)
+            log.info(f"pose 진단: detections={sc_count}, threshold={self.threshold}")
 
         if scores is None or len(scores) == 0:
             return []
