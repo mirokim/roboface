@@ -59,6 +59,7 @@ async def run_vision(
     last_keypoints = None
     # 거리 변화 감지 — 30cm 이상 가까워지거나 멀어지면 멘트
     last_distance_for_comment: float | None = None
+    last_diag_log_at = 0.0
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
@@ -77,6 +78,16 @@ async def run_vision(
                     d for d in detections
                     if d.class_name == "person" and d.confidence >= person_filter_conf
                 ]
+                # 5초마다 진단 로그
+                now_dt = time.time()
+                if now_dt - last_diag_log_at > 5.0:
+                    last_diag_log_at = now_dt
+                    has_kp = any(d.keypoints is not None for d in person_dets)
+                    log.info(
+                        f"vision: raw={len(detections)} "
+                        f"person_dets={len(person_dets)} (필터≥{person_filter_conf}) "
+                        f"keypoints={'있음' if has_kp else '없음'}"
+                    )
                 if person_dets:
                     biggest = max(
                         person_dets,
