@@ -12,10 +12,11 @@ import asyncio
 import signal
 import sys
 
+from src.audio.mic import Microphone, MicCaptureError
 from src.brain import memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
-from src.config import is_robot
+from src.config import AUDIO_INPUT_DEVICE, is_robot
 from src.face.expressions import NEUTRAL
 from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
@@ -24,12 +25,14 @@ from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
 from src.tasks import journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
+from src.tasks.audio_reactive import run_audio_reactive
 from src.tasks.eye_tracker import run_eye_tracker
 from src.tasks.head_tracker import run_head_tracker
 from src.tasks.idle_animation import run_ambient_motion, run_idle_gaze
 from src.tasks.mood_drift import run_mood_drift
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
+from src.tasks.reactive_face import flash_expression
 from src.tasks.vision_task import run_vision
 from src.tasks.voice_assistant import run_voice_assistant
 from src.tasks.work_tracker import WorkTracker
@@ -73,6 +76,15 @@ async def run_robot() -> None:
     ambient.add_handler(schedule_extractor.handle_transcript)
     ambient.add_handler(journal_writer.handle_transcript)
 
+    # 공유 마이크 — voice_assistant + audio_reactive 둘 다 subscribe
+    shared_mic: Microphone | None = None
+    try:
+        shared_mic = Microphone(device=AUDIO_INPUT_DEVICE)
+        shared_mic.__enter__()  # 시작 (callback 활성)
+    except MicCaptureError as e:
+        log.warning(f"마이크 사용 불가 — 음성/박수/음악 기능 비활성: {e}")
+        shared_mic = None
+
     bg_tasks = [
         asyncio.create_task(sensors.run(), name="sensors"),
         asyncio.create_task(run_idle_gaze(face, perception), name="idle_gaze"),
@@ -101,10 +113,17 @@ async def run_robot() -> None:
         ),
         # 음성 어시스턴트 — wake word → STT → Claude → TTS
         asyncio.create_task(
-            run_voice_assistant(ctx, face, servos=servos),
+            run_voice_assistant(ctx, face, servos=servos, mic=shared_mic),
             name="voice_assistant",
         ),
     ]
+    if shared_mic is not None:
+        # 박수 + 음악 비트 → 표정/모션 반응
+        bg_tasks.append(asyncio.create_task(
+            run_audio_reactive(shared_mic, face, ctx,
+                               perception=perception, servos=servos),
+            name="audio_reactive",
+        ))
 
     # 시그널 핸들러로 graceful shutdown
     stop_event = asyncio.Event()
@@ -141,6 +160,11 @@ async def run_robot() -> None:
         sensors.close()
         if lcd is not None:
             lcd.close()
+        if shared_mic is not None:
+            try:
+                shared_mic.__exit__(None, None, None)
+            except Exception:
+                pass
         log.info("종료 완료")
 
 
@@ -157,6 +181,9 @@ def _handle_sensor_event(
         ctx.last_user_seen_at = time.time()
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
+        # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정
+        from src.face.expressions import SURPRISED
+        flash_expression(face, SURPRISED, 0.45)
     elif ev.type == SensorEventType.PRESENCE_LEFT:
         ctx.user_present = False
         if ctx.state != State.IDLE:

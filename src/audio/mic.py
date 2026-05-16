@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import queue
+import threading
 from typing import Any
 
 from src.utils.logger import get_logger
@@ -56,21 +57,40 @@ class Microphone:
         self.sample_rate = sample_rate
         self._sd, _ = _load_backends()
         self._stream = None
+        # 기본 큐 — frame() 호환성 유지
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=200)
+        self._subscribers: list[queue.Queue[bytes]] = [self._queue]
+        self._lock = threading.Lock()
+
+    def add_subscriber(self, maxsize: int = 200) -> queue.Queue[bytes]:
+        """별도 소비자가 자체 큐를 받음. (voice_assistant + audio_monitor 동시)."""
+        q: queue.Queue[bytes] = queue.Queue(maxsize=maxsize)
+        with self._lock:
+            self._subscribers.append(q)
+        return q
+
+    def remove_subscriber(self, q: queue.Queue[bytes]) -> None:
+        with self._lock:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ARG002
         if status:
             log.debug(f"sd status: {status}")
         # indata is int16 numpy array shape (frames, 1)
-        try:
-            self._queue.put_nowait(bytes(indata))
-        except queue.Full:
-            # 드롭 — 처리 못 따라가면 최신만 유지
+        data = bytes(indata)
+        with self._lock:
+            subs = list(self._subscribers)
+        for q in subs:
             try:
-                self._queue.get_nowait()
-                self._queue.put_nowait(bytes(indata))
-            except queue.Empty:
-                pass
+                q.put_nowait(data)
+            except queue.Full:
+                # 드롭 — 최신 유지
+                try:
+                    q.get_nowait()
+                    q.put_nowait(data)
+                except queue.Empty:
+                    pass
 
     def open(self):  # context manager
         return self
@@ -96,14 +116,17 @@ class Microphone:
         log.info("마이크 정지")
 
     async def frame(self, timeout: float = 1.0) -> bytes | None:
-        """30ms PCM 프레임 한 개. 타임아웃이면 None."""
-        loop = asyncio.get_running_loop()
-        try:
-            return await loop.run_in_executor(
-                None, lambda: self._queue.get(timeout=timeout)
-            )
-        except queue.Empty:
-            return None
+        """30ms PCM 프레임 한 개 (기본 큐). 타임아웃이면 None."""
+        return await pop_frame(self._queue, timeout)
+
+
+async def pop_frame(q: "queue.Queue[bytes]", timeout: float = 1.0) -> bytes | None:
+    """임의의 subscriber 큐에서 frame 한 개 pop."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: q.get(timeout=timeout))
+    except queue.Empty:
+        return None
 
 
 class VADRecorder:

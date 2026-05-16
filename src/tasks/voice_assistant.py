@@ -34,6 +34,14 @@ from src.utils.logger import get_logger
 
 log = get_logger("voice_assistant")
 
+
+class _NoopCtx:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
 # 대화 히스토리 (최근 N턴만 Claude로 전달)
 _HISTORY_MAX_TURNS = 6
 
@@ -45,14 +53,18 @@ class VoiceAssistant:
         face: FaceState,
         *,
         servos: ServoController | None = None,
+        mic: Microphone | None = None,
         mic_device: int | str | None = None,
         wake_keyword: str = "jarvis",
         wake_keyword_path: str | None = None,
         max_utterance_sec: float = 10.0,
+        owns_mic: bool = True,
     ) -> None:
         self.ctx = ctx
         self.face = face
         self.servos = servos
+        self.mic = mic                # 외부에서 공유 마이크 받음 (None이면 자체 생성)
+        self.owns_mic = owns_mic if mic is None else False
         self.mic_device = mic_device
         self.wake_keyword = wake_keyword
         self.wake_keyword_path = wake_keyword_path
@@ -67,12 +79,15 @@ class VoiceAssistant:
                                               PorcupineWakeWord | None,
                                               OpenAIWhisperSTT | None,
                                               OpenAITTS | None]:
-        # 마이크
-        try:
-            mic = Microphone(device=self.mic_device)
-        except MicCaptureError as e:
-            log.warning(f"마이크 초기화 실패 — voice_assistant 비활성화: {e}")
-            return None, None, None, None
+        # 마이크 — 외부에서 받지 않았으면 자체 생성
+        if self.mic is not None:
+            mic = self.mic
+        else:
+            try:
+                mic = Microphone(device=self.mic_device)
+            except MicCaptureError as e:
+                log.warning(f"마이크 초기화 실패 — voice_assistant 비활성화: {e}")
+                return None, None, None, None
 
         # Wake word
         try:
@@ -116,8 +131,10 @@ class VoiceAssistant:
         recorder = VADRecorder(mic, aggressiveness=2, silence_ms=700,
                                start_timeout_sec=5.0)
 
+        # 마이크 owner면 with 컨텍스트 진입, 아니면 외부에서 이미 시작된 상태
+        ctx_mic = mic if self.owns_mic else _NoopCtx()
         try:
-            with mic:
+            with ctx_mic:
                 while not self._stop.is_set():
                     log.info(f"💤 wake 대기 중… (\"{wake.keyword}\")")
                     triggered = await wait_for_wake(mic, wake, self._stop)
@@ -220,12 +237,17 @@ async def run_voice_assistant(
     ctx: StateContext,
     face: FaceState,
     servos: ServoController | None = None,
+    mic: Microphone | None = None,
 ) -> None:
-    """main_robot에서 task로 시작하는 진입점."""
+    """main_robot에서 task로 시작하는 진입점.
+
+    mic이 외부에서 주어지면 (audio_monitor와 공유) owner가 아님 — 시작/종료는 외부 책임.
+    """
     va = VoiceAssistant(
         ctx,
         face,
         servos=servos,
+        mic=mic,
         mic_device=AUDIO_INPUT_DEVICE,
         wake_keyword=PORCUPINE_KEYWORD,
         wake_keyword_path=PORCUPINE_KEYWORD_PATH,

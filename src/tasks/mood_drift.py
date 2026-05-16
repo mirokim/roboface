@@ -22,6 +22,7 @@ from src.brain.state_machine import State, StateContext
 from src.face import expressions as expr
 from src.face.expressions import Expression
 from src.face.renderer import FaceState
+from src.tasks import reactive_face
 from src.utils.logger import get_logger
 
 log = get_logger("mood_drift")
@@ -93,6 +94,9 @@ async def run_mood_drift(face: FaceState, ctx: StateContext) -> None:
         await asyncio.sleep(CHECK_INTERVAL_SEC)
 
         if ctx.state not in _ELIGIBLE_STATES:
+            continue
+        if reactive_face.is_locked():
+            # 잠깐 reactive 표정 표시 중 — 양보
             continue
 
         now_ts = time.time()
