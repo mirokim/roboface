@@ -105,7 +105,10 @@ async def run_robot() -> None:
                             name="schedule_sync"),
         asyncio.create_task(run_queue_flusher(), name="queue_flusher"),
         asyncio.create_task(
-            run_proactive(ctx, face, lambda: work_tracker.current_session_id, servos=servos),
+            run_proactive(
+                ctx, face, lambda: work_tracker.current_session_id,
+                servos=servos, perception=perception,
+            ),
             name="proactive",
         ),
         # AI Camera person detection + perception + 표정 거울 + 얼굴 인식

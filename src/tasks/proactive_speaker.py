@@ -11,6 +11,7 @@ import time
 
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import conversation, memory
+from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.brain.triggers import ProactiveTrigger, evaluate_all
 from src.face.expressions import HAPPY, NEUTRAL, WORRIED
@@ -102,13 +103,18 @@ async def run_loop(
     face: FaceState,
     get_session_id,
     servos: ServoController | None = None,
+    perception: PerceptionState | None = None,
 ) -> None:
     """1초마다 트리거 평가."""
     while True:
         await asyncio.sleep(1.0)
         if ctx.state in (State.TALKING, State.LISTENING):
             continue
-        triggers_list = evaluate_all(ctx, current_session_id=get_session_id())
+        triggers_list = evaluate_all(
+            ctx,
+            current_session_id=get_session_id(),
+            perception=perception,
+        )
         if not triggers_list:
             continue
         await fire_trigger(triggers_list[0], ctx, face, servos=servos)

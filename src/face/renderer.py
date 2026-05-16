@@ -90,12 +90,8 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     eye_y = face_top + eye_extent_above
     mouth_y = eye_y + gap
 
-    # 말풍선 떠 있을 때 얼굴 아래로 살짝 내림 (겹침 방지)
+    # 말풍선 떠 있어도 얼굴 위치는 고정 — 위쪽에 덮어 그림
     speech_active = face.speech_text and now < face.speech_until
-    if speech_active:
-        speech_drop = 14
-        eye_y += speech_drop
-        mouth_y += speech_drop
 
     left_eye = (DISPLAY_WIDTH // 2 - eye_offset + sh_dx, eye_y + sh_dy)
     right_eye = (DISPLAY_WIDTH // 2 + eye_offset + sh_dx, eye_y + sh_dy)
