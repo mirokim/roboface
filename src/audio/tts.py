@@ -133,7 +133,7 @@ async def speak(
     text: str,
     tts: OpenAITTS | None = None,
 ) -> None:
-    """TTS로 발화 + 립싱크.
+    """TTS로 발화 + 립싱크 + 말풍선.
 
     tts=None이면 fake animation으로 폴백.
     """
@@ -160,6 +160,9 @@ async def speak(
     envelope = _compute_rms_envelope(pcm, sr, window_ms=50)
     duration = len(pcm) / 2 / sr  # int16 mono
 
+    # 말풍선
+    face.show_speech(text, duration)
+
     # 재생 시작 (비동기) + envelope 따라 mouth 갱신
     playback = asyncio.create_task(_play_pcm(pcm, sr))
     saved_shape = face.mouth_state.shape
@@ -178,6 +181,7 @@ async def speak(
     finally:
         face.mouth_state.shape = saved_shape
         face.mouth_state.talk_amplitude = 0.0
+        # 말풍선은 show_speech가 duration+1.0초로 잡아둠 — renderer가 만료 시 자동 클리어
         try:
             await playback
         except Exception:
@@ -199,8 +203,9 @@ async def _play_pcm(pcm: bytes, sample_rate: int) -> None:
 
 async def _fake_speak(face: FaceState, text: str,
                       duration_per_char: float = 0.06) -> None:
-    """TTS 사용 불가 시 길이 기반 더미 입 모양."""
+    """TTS 사용 불가 시 길이 기반 더미 입 모양 + 말풍선."""
     duration = max(0.5, len(text) * duration_per_char)
+    face.show_speech(text, duration)
     end = asyncio.get_event_loop().time() + duration
     saved_shape = face.mouth_state.shape
     while asyncio.get_event_loop().time() < end:

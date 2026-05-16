@@ -14,7 +14,7 @@ from src.config import (
     COLOR_BG, COLOR_INDICATOR_REC,
     DISPLAY_HEIGHT, DISPLAY_WIDTH, FPS,
 )
-from src.face import eyes, mouth
+from src.face import extras, eyes, mouth
 from src.face.expressions import Expression, NEUTRAL
 
 
@@ -28,6 +28,14 @@ class FaceState:
     recording: bool = False
     brightness: float = 1.0   # 0.0~1.0
 
+    # 환경 반응 (thermal_state task가 갱신)
+    sweat_intensity: float = 0.0     # 0~1, 얼굴 옆에 땀방울 표시
+    shiver_intensity: float = 0.0    # 0~1, 얼굴 좌우 미세 떨림
+
+    # 말풍선 — speech_text가 있고 now < speech_until 이면 상단에 표시
+    speech_text: str | None = None
+    speech_until: float = 0.0
+
     def apply_expression(self, expr: Expression) -> None:
         # 표정이 실제로 바뀌면 깜빡임으로 자연스럽게 전환
         changed = self.expression.name != expr.name
@@ -36,6 +44,15 @@ class FaceState:
         self.mouth_state.shape = expr.mouth
         if changed:
             eyes.trigger_blink(self.eye_state, time.time())
+
+    def show_speech(self, text: str, duration_sec: float) -> None:
+        """발화 시작 시 호출 — 말풍선 표시 시작."""
+        self.speech_text = text
+        self.speech_until = time.time() + duration_sec + 1.0  # 음성 끝나고 1초 더
+
+    def clear_speech(self) -> None:
+        self.speech_text = None
+        self.speech_until = 0.0
 
 
 def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
@@ -49,6 +66,9 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
 
     bg = tuple(int(c * face.brightness) for c in COLOR_BG)
     canvas.fill(bg)
+
+    # 추울 때 떨림 오프셋 — 얼굴 전체에 적용
+    sh_dx, sh_dy = extras.shiver_offset(face.shiver_intensity, now)
 
     # === 얼굴 위치 동적 계산 ===
     eye_size = 56
@@ -64,13 +84,33 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     eye_y = face_top + eye_extent_above
     mouth_y = eye_y + gap
 
-    left_eye = (DISPLAY_WIDTH // 2 - eye_offset, eye_y)
-    right_eye = (DISPLAY_WIDTH // 2 + eye_offset, eye_y)
+    # 말풍선 떠 있을 때 얼굴 아래로 살짝 내림 (겹침 방지)
+    speech_active = face.speech_text and now < face.speech_until
+    if speech_active:
+        speech_drop = 14
+        eye_y += speech_drop
+        mouth_y += speech_drop
+
+    left_eye = (DISPLAY_WIDTH // 2 - eye_offset + sh_dx, eye_y + sh_dy)
+    right_eye = (DISPLAY_WIDTH // 2 + eye_offset + sh_dx, eye_y + sh_dy)
 
     eyes.draw_eyes(canvas, face.eye_state, left_eye, right_eye, size=eye_size)
 
-    mouth_center = (DISPLAY_WIDTH // 2, mouth_y)
+    mouth_center = (DISPLAY_WIDTH // 2 + sh_dx, mouth_y + sh_dy)
     mouth.draw_mouth(canvas, face.mouth_state, mouth_center, width=50)
+
+    # 땀방울
+    if face.sweat_intensity > 0.05:
+        extras.draw_sweat(canvas, face.sweat_intensity,
+                          right_eye, eye_size, now)
+
+    # 말풍선 (얼굴 그리고 나서 상단에 덮어 그림)
+    if speech_active:
+        extras.draw_speech_bubble(canvas, face.speech_text)
+    elif face.speech_text and now >= face.speech_until:
+        # 시간 지남 — 자동 클리어
+        face.speech_text = None
+        face.speech_until = 0.0
 
     # 녹음 인디케이터
     if face.recording:

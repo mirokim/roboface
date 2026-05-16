@@ -33,6 +33,7 @@ from src.tasks.mood_drift import run_mood_drift
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
 from src.tasks.reactive_face import flash_expression
+from src.tasks.thermal_state import run_thermal_state
 from src.tasks.vision_task import run_vision
 from src.tasks.voice_assistant import run_voice_assistant
 from src.tasks.work_tracker import WorkTracker
@@ -40,6 +41,9 @@ from src.utils.logger import get_logger
 import time
 
 log = get_logger("main_robot")
+
+# 핸들러가 ENV_TEMP를 perception에 반영할 수 있게 한 참조 — run_robot이 set
+_PERCEPTION_FOR_TEMP: PerceptionState | None = None
 
 
 async def run_robot() -> None:
@@ -63,6 +67,8 @@ async def run_robot() -> None:
     sensors.register_default()
 
     perception = PerceptionState()
+    global _PERCEPTION_FOR_TEMP
+    _PERCEPTION_FOR_TEMP = perception
     servos = create_servos()
     # 시작 시 머리 중앙 정렬
     try:
@@ -91,6 +97,7 @@ async def run_robot() -> None:
         asyncio.create_task(run_eye_tracker(face, perception, ctx), name="eye_tracker"),
         asyncio.create_task(run_ambient_motion(servos, ctx), name="ambient_motion"),
         asyncio.create_task(run_mood_drift(face, ctx), name="mood_drift"),
+        asyncio.create_task(run_thermal_state(face, perception), name="thermal"),
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
         asyncio.create_task(ambient.run(), name="ambient"),
@@ -190,7 +197,13 @@ def _handle_sensor_event(
         if ctx.state != State.IDLE:
             ctx.transition(State.IDLE, face)
     elif ev.type == SensorEventType.ENV_TEMP:
-        memory.log_env(ev.data["value"], 0.0)
+        temp = ev.data.get("value")
+        if temp is not None:
+            memory.log_env(temp, 0.0)
+            # perception에 반영 — thermal_state task가 face에 매핑
+            global _PERCEPTION_FOR_TEMP
+            if _PERCEPTION_FOR_TEMP is not None:
+                _PERCEPTION_FOR_TEMP.temperature_c = float(temp)
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
         asyncio.create_task(_wave_back(ctx, face, servos))

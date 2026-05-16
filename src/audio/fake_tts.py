@@ -49,6 +49,7 @@ async def speak(face: FaceState, text: str, duration_per_char: float = 0.06) -> 
     duration = max(0.5, len(text) * duration_per_char)
     log.info(f'speaking ({duration:.1f}s): "{text}"')
 
+    face.show_speech(text, duration)
     end = asyncio.get_event_loop().time() + duration
     saved_shape = face.mouth_state.shape
     while asyncio.get_event_loop().time() < end:
