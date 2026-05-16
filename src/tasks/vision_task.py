@@ -46,6 +46,8 @@ async def run_vision(
     face_memory = FaceMemory(DATA_DIR / "faces.db") if ctx is not None else None
     last_recognized: str | None = None
     last_recognize_at = 0.0
+    last_person_bbox: tuple[float, float, float, float] | None = None
+    last_person_at = 0.0
     log.info("vision task 시작 (IMX500 + wave + emotion + face memory)")
 
     try:
@@ -77,17 +79,30 @@ async def run_vision(
                 ):
                     perception.clear_person()
 
-            # 손 흔들기 + 표정 거울 + 얼굴 인식 — 사람이 보일 때, frame 1회 캡처
+            # person_bbox 잠깐 끊겨도 1.5초까지는 이전 bbox 유지 — wave detector가
+            # 손 흔들기 중 person 인식 깜빡임으로 reset되는 거 방지.
+            now_t = time.time()
             if person_bbox is not None:
+                last_person_bbox = person_bbox
+                last_person_at = now_t
+                effective_bbox = person_bbox
+            elif last_person_bbox is not None and now_t - last_person_at < 1.5:
+                effective_bbox = last_person_bbox
+            else:
+                effective_bbox = None
+                last_person_bbox = None
+
+            # 손 흔들기 + 표정 거울 + 얼굴 인식 — 사람이 보일 때, frame 1회 캡처
+            if effective_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
-                    if wave_detector.process(frame, person_bbox):
+                    if wave_detector.process(frame, effective_bbox):
                         emit_event(SensorEvent(
                             type=SensorEventType.GESTURE_WAVE,
-                            data={"bbox": person_bbox},
+                            data={"bbox": effective_bbox},
                         ))
                     if emotion_mirror is not None and face is not None:
-                        emotion = emotion_mirror.process(frame, person_bbox)
+                        emotion = emotion_mirror.process(frame, effective_bbox)
                         if emotion == EMOTION_SMILE:
                             # 사용자가 웃으면 같이 웃음 (짧게)
                             from src.face.expressions import HAPPY
@@ -96,7 +111,7 @@ async def run_vision(
                     if (face_memory is not None and ctx is not None
                             and time.time() - last_recognize_at > 2.0):
                         last_recognize_at = time.time()
-                        face_crop = detect_face_crop(frame, person_bbox)
+                        face_crop = detect_face_crop(frame, effective_bbox)
                         if face_crop is not None:
                             # 1) pending register 처리 우선
                             if ctx.pending_register_name:
