@@ -29,13 +29,13 @@ class WaveDetector:
     def __init__(
         self,
         fps: float = 5.0,
-        history_sec: float = 3.0,
+        history_sec: float = 2.5,
         cooldown_sec: float = 5.0,
-        min_motion_pixels: int = 80,
-        diff_threshold: int = 20,
-        min_amplitude: float = 0.15,
-        min_zero_crossings: int = 4,
-        max_zero_crossings: int = 14,
+        min_motion_pixels: int = 60,
+        diff_threshold: int = 18,
+        min_amplitude: float = 0.08,
+        min_zero_crossings: int = 3,
+        max_zero_crossings: int = 16,
     ) -> None:
         self.fps = fps
         self.history_max = max(8, int(fps * history_sec))
@@ -50,6 +50,7 @@ class WaveDetector:
         self._prev_bbox: tuple[float, float, float, float] | None = None
         self.centroid_history: deque[float] = deque(maxlen=self.history_max)
         self.last_wave_at = 0.0
+        self._last_debug_log_at = 0.0
 
     def reset(self) -> None:
         self._prev_gray = None
@@ -140,14 +141,22 @@ class WaveDetector:
     def _evaluate(self, np) -> bool:
         arr = np.fromiter(self.centroid_history, dtype=np.float32)
         amp = float(arr.max() - arr.min())
-        if amp < self.min_amplitude:
-            return False
-
         median = float(np.median(arr))
         signs = np.sign(arr - median)
-        # 부호 변화 횟수 = zero crossings
         zero_crossings = int(np.sum(np.abs(np.diff(signs)) > 0))
 
+        # 튜닝용 — 2초마다 현재 측정값 INFO로 찍어줌
+        now = time.time()
+        if now - self._last_debug_log_at > 2.0:
+            self._last_debug_log_at = now
+            log.info(
+                f"wave 후보 amp={amp:.3f} zero_crossings={zero_crossings} "
+                f"(필요: amp≥{self.min_amplitude}, "
+                f"zc {self.min_zero_crossings}~{self.max_zero_crossings})"
+            )
+
+        if amp < self.min_amplitude:
+            return False
         if self.min_zero_crossings <= zero_crossings <= self.max_zero_crossings:
             log.info(
                 f"👋 wave 감지! amp={amp:.2f} zero_crossings={zero_crossings}"
