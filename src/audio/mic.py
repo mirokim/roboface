@@ -96,15 +96,21 @@ class Microphone:
         return self
 
     def __enter__(self) -> "Microphone":
-        self._stream = self._sd.RawInputStream(
-            samplerate=self.sample_rate,
-            blocksize=FRAME_SAMPLES,
-            device=self.device,
-            channels=1,
-            dtype="int16",
-            callback=self._callback,
-        )
-        self._stream.start()
+        try:
+            self._stream = self._sd.RawInputStream(
+                samplerate=self.sample_rate,
+                blocksize=FRAME_SAMPLES,
+                device=self.device,
+                channels=1,
+                dtype="int16",
+                callback=self._callback,
+            )
+            self._stream.start()
+        except Exception as e:
+            # sounddevice.PortAudioError 등 — 디바이스 없음/잘못됨
+            raise MicCaptureError(
+                f"오디오 디바이스 열기 실패 (device={self.device}): {e}"
+            ) from e
         log.info(f"마이크 시작 (device={self.device}, {self.sample_rate}Hz)")
         return self
 
