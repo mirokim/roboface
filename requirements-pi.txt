@@ -17,7 +17,9 @@ adafruit-circuitpython-dht>=4.0.0
 pyserial>=3.5                          # mmWave UART
 
 # 카메라
-picamera2>=0.3.20
+# picamera2는 pip로 깔면 libcamera 바인딩이 누락됨. apt로만 설치:
+#   sudo apt install -y python3-picamera2 python3-libcamera
+# venv는 반드시 --system-site-packages 옵션으로 만들어 apt 패키지가 보이게 해야 함.
 opencv-python>=4.9.0
 
 # 음성 (USB 스피커폰)
