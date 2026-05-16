@@ -1,0 +1,23 @@
+[Unit]
+Description=Roboface AI Companion Robot
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=miro
+Group=miro
+WorkingDirectory=/home/miro/roboface
+EnvironmentFile=-/home/miro/roboface/.env
+ExecStart=/home/miro/roboface/.venv/bin/python -m src.main_robot
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/miro/roboface/logs/roboface.log
+StandardError=append:/home/miro/roboface/logs/roboface.log
+
+# 종료 시 graceful (SIGTERM 받고 정리할 시간)
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
