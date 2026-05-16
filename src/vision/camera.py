@@ -105,9 +105,9 @@ class IMX500Camera:
         target_fps: float = 5.0,
         mode: str = "detect",
     ):
-        # pose 모드는 보통 0.3 정도가 적절 (공식 데모 기본값)
+        # pose 모드 score는 매우 낮은 경우 많음 (HigherHRNet 특성). 일단 낮게.
         if confidence_threshold is None:
-            confidence_threshold = 0.3 if mode == "pose" else 0.5
+            confidence_threshold = 0.1 if mode == "pose" else 0.5
         if mode not in ("detect", "pose"):
             raise ValueError(f"mode는 'detect' 또는 'pose' (got '{mode}')")
         if model_path is None:
@@ -239,14 +239,11 @@ class IMX500Camera:
             log.debug(f"pose postprocess 실패: {e}")
             return []
 
-        # 5초마다 한 번 현재 상태 진단
-        now = time.time()
-        if now - self._pose_diag_last > 5.0:
-            self._pose_diag_last = now
-            sc_count = 0 if scores is None else len(scores)
-            log.info(f"pose 진단: detections={sc_count}, threshold={self.threshold}")
-
         if scores is None or len(scores) == 0:
+            now = time.time()
+            if now - self._pose_diag_last > 5.0:
+                self._pose_diag_last = now
+                log.info(f"pose 진단: raw=0 (감지된 사람 없음)")
             return []
 
         try:
@@ -259,6 +256,16 @@ class IMX500Camera:
         except Exception as e:
             log.debug(f"pose reshape 실패: {e}")
             return []
+
+        # 5초마다 현재 score 분포 진단
+        now = time.time()
+        if now - self._pose_diag_last > 5.0:
+            self._pose_diag_last = now
+            score_list = [float(s) for s in scores]
+            log.info(
+                f"pose 진단: raw={len(scores)} scores={[f'{s:.2f}' for s in score_list[:5]]} "
+                f"threshold={self.threshold}"
+            )
 
         detections: list[Detection] = []
         for i, score in enumerate(scores):

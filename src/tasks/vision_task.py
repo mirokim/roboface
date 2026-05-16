@@ -43,7 +43,7 @@ async def run_vision(
         return
 
     detector = PersonDetector(
-        min_confidence=0.3 if VISION_MODE == "pose" else 0.5,
+        min_confidence=0.1 if VISION_MODE == "pose" else 0.5,
     )
     wave_detector: WaveDetector | WristWaveDetector
     if VISION_MODE == "pose":
@@ -63,8 +63,8 @@ async def run_vision(
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
-        # pose 모드 점수는 보통 0.3~0.5, detect 모드는 0.5+ → 모드별 필터링
-        person_filter_conf = 0.3 if VISION_MODE == "pose" else 0.5
+        # pose 모드 점수는 매우 낮은 경우 많음 (HigherHRNet 특성)
+        person_filter_conf = 0.1 if VISION_MODE == "pose" else 0.5
 
         async for detections in cam.stream():
             events = detector.process(detections)
