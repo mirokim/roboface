@@ -171,7 +171,7 @@ class IMX500Camera:
         try:
             return self.cam.capture_array("main")
         except Exception as e:
-            log.debug(f"capture_array 실패: {e}")
+            log.warning(f"capture_array 실패: {e}")
             return None
 
     def close(self) -> None:

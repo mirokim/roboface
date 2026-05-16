@@ -128,7 +128,7 @@ async def run_vision(
                                     if ctx.user_name:
                                         ctx.user_name = None
                 except Exception as e:
-                    log.debug(f"vision frame 분석 에러: {e}")
+                    log.warning(f"vision frame 분석 에러: {e}")
             else:
                 wave_detector.reset()
                 last_recognized = None
