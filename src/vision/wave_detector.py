@@ -46,10 +46,10 @@ class WaveDetector:
         fps: float = 5.0,
         history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
-        min_motion_pixels: int = 25,
+        min_motion_pixels: int = 40,
         diff_threshold: int = 15,
-        min_amplitude: float = 0.08,
-        min_zero_crossings: int = 3,
+        min_amplitude: float = 0.15,
+        min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
         min_eval_frames: int = 6,
     ) -> None:
