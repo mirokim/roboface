@@ -11,6 +11,7 @@ from src.brain.state_machine import StateContext
 from src.config import DATA_DIR
 from src.face.renderer import FaceState
 from src.sensors.base import SensorEvent, SensorEventType
+from src.tasks import behavior_speaker
 from src.tasks.reactive_face import flash_expression
 from src.utils.logger import get_logger
 from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
@@ -48,6 +49,8 @@ async def run_vision(
     last_recognize_at = 0.0
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
+    # 거리 변화 감지 — 30cm 이상 가까워지거나 멀어지면 멘트
+    last_distance_for_comment: float | None = None
     log.info("vision task 시작 (IMX500 + wave + emotion + face memory)")
 
     try:
@@ -68,11 +71,35 @@ async def run_vision(
                         person_dets,
                         key=lambda d: (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]),
                     )
+                    cur_dist = detector._last_distance or -1.0
                     perception.update_person(
                         bbox=biggest.bbox,
-                        distance_cm=detector._last_distance or -1.0,
+                        distance_cm=cur_dist,
                     )
                     person_bbox = biggest.bbox
+
+                    # 거리 변화 멘트 — 30cm 이상 변화 시
+                    if (cur_dist > 0 and last_distance_for_comment is not None
+                            and face is not None and ctx is not None):
+                        delta = cur_dist - last_distance_for_comment
+                        if delta < -30:
+                            behavior_speaker.say(
+                                face, ctx,
+                                behavior_speaker.closer_message(),
+                                kind="distance_closer",
+                                cooldown_sec=60.0,
+                            )
+                            last_distance_for_comment = cur_dist
+                        elif delta > 30:
+                            behavior_speaker.say(
+                                face, ctx,
+                                behavior_speaker.farther_message(),
+                                kind="distance_farther",
+                                cooldown_sec=60.0,
+                            )
+                            last_distance_for_comment = cur_dist
+                    elif cur_dist > 0 and last_distance_for_comment is None:
+                        last_distance_for_comment = cur_dist
                 elif (
                     perception.person_present
                     and time.time() - perception.last_person_seen_at > detector.away_timeout_sec
@@ -141,9 +168,17 @@ async def run_vision(
                                             f"😊 인식: {match.name} "
                                             f"(conf={match.confidence:.3f})"
                                         )
-                                        if face is not None:
+                                        if face is not None and ctx is not None:
                                             from src.face.expressions import HAPPY
                                             flash_expression(face, HAPPY, 1.0)
+                                            behavior_speaker.say(
+                                                face, ctx,
+                                                behavior_speaker.face_greeting_message(
+                                                    match.name,
+                                                ),
+                                                kind="face_recognize",
+                                                cooldown_sec=120.0,
+                                            )
                                 else:
                                     last_recognized = None
                                     # 알 수 없는 사람 — user_name clear
@@ -154,6 +189,7 @@ async def run_vision(
             else:
                 wave_detector.reset()
                 last_recognized = None
+                last_distance_for_comment = None
                 if ctx is not None and ctx.user_name:
                     ctx.user_name = None
     except asyncio.CancelledError:

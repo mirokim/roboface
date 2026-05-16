@@ -27,7 +27,7 @@ from src.motion import poses
 from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
-from src.tasks import journal_writer, schedule_extractor
+from src.tasks import behavior_speaker, journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
 from src.tasks.audio_reactive import run_audio_reactive
 from src.tasks.eye_tracker import run_eye_tracker
@@ -191,12 +191,24 @@ def _handle_sensor_event(
 ) -> None:
     work_tracker.on_event(ev, ctx)
     if ev.type == SensorEventType.PRESENCE_NEW:
+        now = time.time()
+        absence_sec = (
+            now - ctx.last_user_seen_at if ctx.last_user_seen_at else 99999.0
+        )
         ctx.user_present = True
-        ctx.last_user_seen_at = time.time()
+        ctx.last_user_seen_at = now
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
-        # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정
+        # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정 + 부재 시간 기반 멘트
         flash_expression(face, SURPRISED, 0.45)
+        # 30초 미만이면 재등장 멘트 굳이 X (계속 있는 것과 구분 안 됨)
+        if absence_sec > 30:
+            behavior_speaker.say(
+                face, ctx,
+                behavior_speaker.reappear_message(absence_sec),
+                kind="reappear",
+                cooldown_sec=20.0,
+            )
     elif ev.type == SensorEventType.PRESENCE_LEFT:
         ctx.user_present = False
         if ctx.state != State.IDLE:
