@@ -9,17 +9,21 @@ pygame 없음. LCD 렌더러는 추후 통합. 지금은 백그라운드 task만
 from __future__ import annotations
 
 import asyncio
+import random
 import signal
 import sys
+import time
 
+from src.audio.fake_tts import speak as fake_speak
 from src.audio.mic import Microphone, MicCaptureError
 from src.brain import memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import AUDIO_INPUT_DEVICE, is_robot
-from src.face.expressions import NEUTRAL
+from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
+from src.motion import poses
 from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
@@ -38,12 +42,8 @@ from src.tasks.vision_task import run_vision
 from src.tasks.voice_assistant import run_voice_assistant
 from src.tasks.work_tracker import WorkTracker
 from src.utils.logger import get_logger
-import time
 
 log = get_logger("main_robot")
-
-# 핸들러가 ENV_TEMP를 perception에 반영할 수 있게 한 참조 — run_robot이 set
-_PERCEPTION_FOR_TEMP: PerceptionState | None = None
 
 
 async def run_robot() -> None:
@@ -67,8 +67,6 @@ async def run_robot() -> None:
     sensors.register_default()
 
     perception = PerceptionState()
-    global _PERCEPTION_FOR_TEMP
-    _PERCEPTION_FOR_TEMP = perception
     servos = create_servos()
     # 시작 시 머리 중앙 정렬
     try:
@@ -155,7 +153,9 @@ async def run_robot() -> None:
         # 메인 루프: 센서 이벤트 처리 + LCD 렌더 + 상태 머신
         while not stop_event.is_set():
             for ev in sensors.drain_events():
-                _handle_sensor_event(ev, ctx, face, work_tracker, servos)
+                _handle_sensor_event(
+                    ev, ctx, face, work_tracker, servos, perception,
+                )
             if lcd is not None:
                 lcd.render(face)
             await asyncio.sleep(0.033)  # ~30 FPS
@@ -185,6 +185,7 @@ def _handle_sensor_event(
     face: FaceState,
     work_tracker: WorkTracker,
     servos=None,
+    perception: PerceptionState | None = None,
 ) -> None:
     work_tracker.on_event(ev, ctx)
     if ev.type == SensorEventType.PRESENCE_NEW:
@@ -193,7 +194,6 @@ def _handle_sensor_event(
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
         # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정
-        from src.face.expressions import SURPRISED
         flash_expression(face, SURPRISED, 0.45)
     elif ev.type == SensorEventType.PRESENCE_LEFT:
         ctx.user_present = False
@@ -203,10 +203,8 @@ def _handle_sensor_event(
         temp = ev.data.get("value")
         if temp is not None:
             memory.log_env(temp, 0.0)
-            # perception에 반영 — thermal_state task가 face에 매핑
-            global _PERCEPTION_FOR_TEMP
-            if _PERCEPTION_FOR_TEMP is not None:
-                _PERCEPTION_FOR_TEMP.temperature_c = float(temp)
+            if perception is not None:
+                perception.temperature_c = float(temp)
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
         asyncio.create_task(_wave_back(ctx, face, servos))
@@ -227,20 +225,16 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     # 이미 다른 인터랙션 중이면 양보
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
-    from src.audio.fake_tts import speak as fake_speak
-    from src.face.expressions import HAPPY
-    import random as _random
     face.apply_expression(HAPPY)
     ctx.transition(State.GREETING, face)
-    greeting = _random.choice(_WAVE_GREETINGS)
-    # 말풍선은 task scheduling을 기다리지 않도록 여기서 즉시 띄움.
-    # mouth animation/TTS 본체는 백그라운드 task로 따로 돌림.
-    face.show_speech(greeting, max(0.5, len(greeting) * 0.06))
+    greeting = random.choice(_WAVE_GREETINGS)
     log.info(f"🗣️  {greeting}")
+    # fake_speak가 내부에서 face.show_speech 호출. 첫 await 대기 없이
+    # 즉시 노출되도록 task 생성 직후 한 번 yield해서 task가 실행되게 함.
     speech_task = asyncio.create_task(fake_speak(face, greeting))
+    await asyncio.sleep(0)
     try:
         if servos is not None:
-            from src.motion import poses
             await poses.dance(servos, face, bpm=140, beats=4)
         else:
             await asyncio.sleep(1.5)

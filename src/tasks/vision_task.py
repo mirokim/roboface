@@ -81,22 +81,29 @@ async def run_vision(
 
             # person_bbox 잠깐 끊겨도 1.5초까지는 이전 bbox 유지 — wave detector가
             # 손 흔들기 중 person 인식 깜빡임으로 reset되는 거 방지.
+            # 단 wave 감지는 person이 실제로 잡힌 프레임에서만 — grace 동안에는
+            # bbox 영역에 다른 모션(커튼 등)이 wave로 잘못 인식되는 거 방지.
             now_t = time.time()
             if person_bbox is not None:
                 last_person_bbox = person_bbox
                 last_person_at = now_t
                 effective_bbox = person_bbox
+                person_confirmed_this_frame = True
             elif last_person_bbox is not None and now_t - last_person_at < 1.5:
                 effective_bbox = last_person_bbox
+                person_confirmed_this_frame = False
             else:
                 effective_bbox = None
                 last_person_bbox = None
+                person_confirmed_this_frame = False
 
             # 손 흔들기 + 표정 거울 + 얼굴 인식 — 사람이 보일 때, frame 1회 캡처
             if effective_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
-                    if wave_detector.process(frame, effective_bbox):
+                    if person_confirmed_this_frame and wave_detector.process(
+                        frame, effective_bbox,
+                    ):
                         emit_event(SensorEvent(
                             type=SensorEventType.GESTURE_WAVE,
                             data={"bbox": effective_bbox},

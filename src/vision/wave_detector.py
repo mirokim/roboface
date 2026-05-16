@@ -5,11 +5,11 @@
 2. grayscale로 변환 + 다운샘플
 3. 이전 프레임과의 |diff| → motion mask
 4. 컬럼별 motion 합 → motion centroid x (가중평균)
-5. centroid x를 시계열에 push (~3초 buffer)
-6. 시계열의 (a) 진폭 충분히 큼 + (b) zero crossings 4~12회 → wave!
+5. centroid x를 시계열에 push (history_sec 분량)
+6. 시계열의 (a) 진폭 ≥ min_amplitude + (b) zero crossings가 범위 안 → wave!
 
 False positive 방지:
-- 감지 후 5초 cooldown
+- 감지 후 cooldown_sec 동안 push/평가 둘 다 skip (잔류 노이즈 차단)
 - bbox 크게 바뀌면 (예: 사람이 들어옴) prev 초기화
 - motion 너무 적으면 push 안 함 (정적 frame이 평균 끌어내림 방지)
 """
@@ -23,6 +23,21 @@ from typing import Any
 from src.utils.logger import get_logger
 
 log = get_logger("wave_detector")
+
+
+def _get_numpy():
+    """numpy lazy import — robot 모드에서만 필요, 한 번 import 후 캐시."""
+    if _get_numpy._cached is not None:
+        return _get_numpy._cached
+    try:
+        import numpy as np
+        _get_numpy._cached = np
+        return np
+    except ImportError:
+        return None
+
+
+_get_numpy._cached = None  # type: ignore[attr-defined]
 
 
 class WaveDetector:
@@ -70,17 +85,19 @@ class WaveDetector:
         if frame is None or bbox is None:
             return False
 
-        # numpy는 robot 모드에서만 사용 — 지연 import
-        try:
-            import numpy as np
-        except ImportError:
+        np = _get_numpy()
+        if np is None:
+            return False
+
+        # 감지 직후 cooldown — push/평가 모두 skip해 잔류 노이즈 차단
+        if time.time() - self.last_wave_at < self.cooldown_sec:
             return False
 
         # bbox 크게 바뀌면 prev 초기화 (사람 다시 들어옴)
         if self._prev_bbox is not None:
             dx = abs(bbox[0] - self._prev_bbox[0]) + abs(bbox[2] - self._prev_bbox[2])
             if dx > 0.25:
-                log.info(f"wave reset — bbox 점프 dx={dx:.2f}")
+                log.debug(f"wave reset — bbox 점프 dx={dx:.2f}")
                 self.reset()
         self._prev_bbox = bbox
 
@@ -119,11 +136,11 @@ class WaveDetector:
         mask = diff > self.diff_threshold
         total_motion = int(mask.sum())
 
-        # 진단 — 2초마다 현재 motion / history 상태 INFO로 찍음
+        # 진단 로그 — 2초마다 1회 (튜닝 끝나면 LOG_LEVEL=DEBUG로 끔)
         now = time.time()
         if now - self._last_debug_log_at > 2.0:
             self._last_debug_log_at = now
-            log.info(
+            log.debug(
                 f"wave proc motion={total_motion} (≥{self.min_motion_pixels} 필요) "
                 f"history={len(self.centroid_history)}/{self.history_max}"
             )
@@ -142,24 +159,23 @@ class WaveDetector:
 
         self.centroid_history.append(centroid)
 
-        # 최소 평가 가능 프레임 수 모이면 시도 (history_max에 도달 안 해도 OK)
+        # 최소 평가 가능 프레임 수 모이면 시도
         if len(self.centroid_history) < self.min_eval_frames:
             return False
 
-        # cooldown
-        if time.time() - self.last_wave_at < self.cooldown_sec:
+        return self._evaluate()
+
+    def _evaluate(self) -> bool:
+        np = _get_numpy()
+        if np is None:
             return False
-
-        return self._evaluate(np)
-
-    def _evaluate(self, np) -> bool:
         arr = np.fromiter(self.centroid_history, dtype=np.float32)
         amp = float(arr.max() - arr.min())
         median = float(np.median(arr))
         signs = np.sign(arr - median)
         zero_crossings = int(np.sum(np.abs(np.diff(signs)) > 0))
 
-        log.info(
+        log.debug(
             f"wave eval amp={amp:.3f} zc={zero_crossings} "
             f"(amp≥{self.min_amplitude}, zc {self.min_zero_crossings}~"
             f"{self.max_zero_crossings})"
