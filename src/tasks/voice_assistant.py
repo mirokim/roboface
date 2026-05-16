@@ -42,6 +42,36 @@ class _NoopCtx:
     def __exit__(self, *exc):
         return False
 
+
+# 이름 등록 명령 패턴
+_NAME_PATTERNS = (
+    "내 이름은 ",
+    "내 이름 ",
+    "이 사람 이름은 ",
+    "이 사람은 ",
+    "이름 ",
+)
+
+
+def _extract_register_name(text: str) -> str | None:
+    """등록 명령에서 이름 추출. 매칭 안 되면 None."""
+    t = text.strip()
+    for pat in _NAME_PATTERNS:
+        idx = t.find(pat)
+        if idx < 0:
+            continue
+        rest = t[idx + len(pat):]
+        # 뒤의 조사/꼬리 제거 ("미로야", "미로입니다", "미로", "미로요")
+        rest = rest.split(" ", 1)[0]
+        for tail in ("이야", "야", "입니다", "이에요", "예요", "요", "임"):
+            if rest.endswith(tail):
+                rest = rest[: -len(tail)]
+                break
+        rest = rest.strip("., !?")
+        if 1 <= len(rest) <= 20:
+            return rest
+    return None
+
 # 대화 히스토리 (최근 N턴만 Claude로 전달)
 _HISTORY_MAX_TURNS = 6
 
@@ -186,11 +216,14 @@ class VoiceAssistant:
             self.ctx.transition(prev_state, self.face)
             return
 
-        # Claude 응답
+        # Claude 응답 — 인식된 사용자 이름이 있으면 컨텍스트 prefix
         loop = asyncio.get_running_loop()
+        user_text = text
+        if self.ctx.user_name:
+            user_text = f"[지금 대화 상대: {self.ctx.user_name}] {text}"
         reply = await loop.run_in_executor(
             None,
-            lambda: conversation.respond_to_user(text, self.history),
+            lambda: conversation.respond_to_user(user_text, self.history),
         )
         reply = (reply or "").strip()
         if not reply:
@@ -230,6 +263,14 @@ class VoiceAssistant:
                 log.info("서보 없음 — 댄스 모션 스킵, 표정만")
                 await asyncio.sleep(2.0)
             return True
+
+        # 이름 등록: "내 이름은 OO이야" / "내 이름 OO" / "이 사람 OO이야"
+        name = _extract_register_name(text)
+        if name is not None:
+            log.info(f"📝 face 등록 요청: '{name}' (다음 프레임에서 캡처)")
+            self.ctx.pending_register_name = name
+            return True
+
         return False
 
 

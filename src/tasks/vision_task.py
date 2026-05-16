@@ -7,8 +7,14 @@ import time
 from collections.abc import Callable
 
 from src.brain.perception import PerceptionState
+from src.brain.state_machine import StateContext
+from src.config import DATA_DIR
+from src.face.renderer import FaceState
 from src.sensors.base import SensorEvent, SensorEventType
+from src.tasks.reactive_face import flash_expression
 from src.utils.logger import get_logger
+from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
+from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision.wave_detector import WaveDetector
 
@@ -18,6 +24,8 @@ log = get_logger("vision_task")
 async def run_vision(
     emit_event: Callable[[SensorEvent], None],
     perception: PerceptionState | None = None,
+    face: FaceState | None = None,
+    ctx: StateContext | None = None,
 ) -> None:
     """카메라 스트림 → person detector → sensor events + perception 업데이트."""
     try:
@@ -34,7 +42,11 @@ async def run_vision(
 
     detector = PersonDetector()
     wave_detector = WaveDetector(fps=getattr(cam, "target_fps", 5.0))
-    log.info("vision task 시작 (IMX500 person detection + wave detector)")
+    emotion_mirror = EmotionMirror() if face is not None else None
+    face_memory = FaceMemory(DATA_DIR / "faces.db") if ctx is not None else None
+    last_recognized: str | None = None
+    last_recognize_at = 0.0
+    log.info("vision task 시작 (IMX500 + wave + emotion + face memory)")
 
     try:
         async for detections in cam.stream():
@@ -65,7 +77,7 @@ async def run_vision(
                 ):
                     perception.clear_person()
 
-            # 손 흔들기 감지 — 사람이 보이는 경우에만
+            # 손 흔들기 + 표정 거울 + 얼굴 인식 — 사람이 보일 때, frame 1회 캡처
             if person_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
@@ -74,10 +86,54 @@ async def run_vision(
                             type=SensorEventType.GESTURE_WAVE,
                             data={"bbox": person_bbox},
                         ))
+                    if emotion_mirror is not None and face is not None:
+                        emotion = emotion_mirror.process(frame, person_bbox)
+                        if emotion == EMOTION_SMILE:
+                            # 사용자가 웃으면 같이 웃음 (짧게)
+                            from src.face.expressions import HAPPY
+                            flash_expression(face, HAPPY, 1.5)
+                    # 얼굴 인식 — 매 2초 한 번 (CPU 절약)
+                    if (face_memory is not None and ctx is not None
+                            and time.time() - last_recognize_at > 2.0):
+                        last_recognize_at = time.time()
+                        face_crop = detect_face_crop(frame, person_bbox)
+                        if face_crop is not None:
+                            # 1) pending register 처리 우선
+                            if ctx.pending_register_name:
+                                name = ctx.pending_register_name
+                                if face_memory.register(name, face_crop):
+                                    ctx.user_name = name
+                                    log.info(f"🎉 {name} 등록 완료")
+                                    if face is not None:
+                                        from src.face.expressions import STARSTRUCK
+                                        flash_expression(face, STARSTRUCK, 1.5)
+                                ctx.pending_register_name = None
+                            else:
+                                # 2) 인식 시도
+                                match = face_memory.recognize(face_crop)
+                                if match is not None:
+                                    if match.name != last_recognized:
+                                        last_recognized = match.name
+                                        ctx.user_name = match.name
+                                        log.info(
+                                            f"😊 인식: {match.name} "
+                                            f"(conf={match.confidence:.3f})"
+                                        )
+                                        if face is not None:
+                                            from src.face.expressions import HAPPY
+                                            flash_expression(face, HAPPY, 1.0)
+                                else:
+                                    last_recognized = None
+                                    # 알 수 없는 사람 — user_name clear
+                                    if ctx.user_name:
+                                        ctx.user_name = None
                 except Exception as e:
-                    log.debug(f"wave detection 에러: {e}")
+                    log.debug(f"vision frame 분석 에러: {e}")
             else:
                 wave_detector.reset()
+                last_recognized = None
+                if ctx is not None and ctx.user_name:
+                    ctx.user_name = None
     except asyncio.CancelledError:
         log.info("vision task 취소 요청")
         raise

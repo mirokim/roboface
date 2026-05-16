@@ -101,9 +101,10 @@ async def run_robot() -> None:
             run_proactive(ctx, face, lambda: work_tracker.current_session_id, servos=servos),
             name="proactive",
         ),
-        # AI Camera person detection + perception 업데이트
+        # AI Camera person detection + perception + 표정 거울 + 얼굴 인식
         asyncio.create_task(
-            run_vision(lambda ev: sensors.events.append(ev), perception),
+            run_vision(lambda ev: sensors.events.append(ev), perception,
+                       face=face, ctx=ctx),
             name="vision",
         ),
         # 얼굴 추적 — 서보로 머리 회전

@@ -31,6 +31,10 @@ class StateContext:
     user_present: bool = False
     # ambient_motion이 서보를 점유 중일 때 True — head_tracker가 양보.
     ambient_motion_active: bool = False
+    # 현재 인식된 사용자 이름 (face_memory). None이면 모르는 사람 / 미등록.
+    user_name: str | None = None
+    # 다음 사용자 face crop을 이 이름으로 등록 (voice_assistant가 set)
+    pending_register_name: str | None = None
 
     def transition(self, new_state: State, face: FaceState) -> None:
         if new_state == self.state:
