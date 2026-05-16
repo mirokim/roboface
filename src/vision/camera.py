@@ -139,17 +139,17 @@ class IMX500Camera:
         labels = getattr(intrinsics, "labels", None) if intrinsics else None
         self.labels: list[str] = labels if labels else COCO_CLASSES
 
-        # pose post-processor lazy import
+        # pose post-processor lazy import (picamera2 모듈명: postprocess_highernet)
         self._pose_postprocess = None
         if mode == "pose":
             try:
-                from picamera2.devices.imx500.postprocess_higherhrnet import (
+                from picamera2.devices.imx500.postprocess_highernet import (
                     postprocess_higherhrnet,
                 )
                 self._pose_postprocess = postprocess_higherhrnet
             except ImportError as e:
                 raise RuntimeError(
-                    f"pose 모드는 picamera2 postprocess_higherhrnet 필요: {e}"
+                    f"pose 모드는 picamera2 postprocess_highernet 필요: {e}"
                 ) from e
 
         self.threshold = confidence_threshold
