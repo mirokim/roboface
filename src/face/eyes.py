@@ -42,6 +42,14 @@ class EyeState:
     _next_blink_at: float = 0.0
     _blinking_since: float | None = None
 
+    # === Micro-saccades — 사람 눈은 절대 고정되지 않음 ===
+    # gaze_x/y는 "의도된 시선"이고, saccade_x/y는 그 위에 더해지는 미세 흔들림.
+    saccade_x: float = 0.0
+    saccade_y: float = 0.0
+    _saccade_target_x: float = 0.0
+    _saccade_target_y: float = 0.0
+    _saccade_next_at: float = 0.0
+
 
 def eye_extent_below(shape: EyeShape, size: int) -> int:
     """현재 눈 모양이 중심에서 얼마나 아래로 뻗는지 (px).
@@ -98,6 +106,28 @@ def update_blink(state: EyeState, now: float) -> None:
 
 def trigger_blink(state: EyeState, now: float) -> None:
     state._blinking_since = now
+
+
+# ─── Micro-saccades — 매 프레임 시선에 미세 흔들림 ───
+# 100~350ms마다 새 saccade 타겟 고름 → 그 사이는 부드럽게 보간.
+# 진폭 ±0.04 (gaze 단위) — 화면상 약 ±2px. 거의 안 보이지만 살아있는 느낌 결정적.
+SACCADE_AMP_X = 0.04
+SACCADE_AMP_Y = 0.025
+SACCADE_INTERVAL_MIN = 0.10
+SACCADE_INTERVAL_MAX = 0.35
+SACCADE_BLEND = 0.35   # 보간 속도 (0~1, 클수록 빠르게 따라감)
+
+
+def update_saccade(state: EyeState, now: float) -> None:
+    """매 렌더 프레임 호출 — saccade_x/y 갱신."""
+    if now >= state._saccade_next_at:
+        state._saccade_target_x = random.uniform(-SACCADE_AMP_X, SACCADE_AMP_X)
+        state._saccade_target_y = random.uniform(-SACCADE_AMP_Y, SACCADE_AMP_Y)
+        state._saccade_next_at = now + random.uniform(
+            SACCADE_INTERVAL_MIN, SACCADE_INTERVAL_MAX,
+        )
+    state.saccade_x += (state._saccade_target_x - state.saccade_x) * SACCADE_BLEND
+    state.saccade_y += (state._saccade_target_y - state.saccade_y) * SACCADE_BLEND
 
 
 # ─── 깔끔한 두꺼운 호 그리기 ───
@@ -191,8 +221,9 @@ def draw_eyes(
         _angle(surface, right_center, size, point_right=True)
         return
 
-    # 채워진 타원 — 크기/비율만 다름. 시선 오프셋 전달.
-    gx, gy = int(state.gaze_x * 6), int(state.gaze_y * 4)
+    # 채워진 타원 — 크기/비율만 다름. 시선 + 미세 saccade.
+    gx = int((state.gaze_x + state.saccade_x) * 6)
+    gy = int((state.gaze_y + state.saccade_y) * 4)
     if state.shape == EyeShape.SURPRISED:
         _ellipse(surface, left_center, size, open_ratio, scale=1.15, offset_x=gx, offset_y=gy)
         _ellipse(surface, right_center, size, open_ratio, scale=1.15, offset_x=gx, offset_y=gy)

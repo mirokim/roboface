@@ -45,6 +45,7 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     """
     now = time.time()
     eyes.update_blink(face.eye_state, now)
+    eyes.update_saccade(face.eye_state, now)
 
     bg = tuple(int(c * face.brightness) for c in COLOR_BG)
     canvas.fill(bg)

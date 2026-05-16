@@ -12,6 +12,8 @@ TALKING / ALERTING 등엔 서보 제어권을 다른 task에 양보.
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
@@ -35,6 +37,20 @@ RETURN_TO_CENTER_AFTER_SEC = 3  # 사람 부재 N초 후 중앙 복귀
 # 카메라 마운트 방향에 따른 뒤집기 — 동작 확인하면서 조정 필요
 PAN_INVERT = True   # 카메라가 사람을 화면 왼쪽에 볼 때 → 오른쪽으로 회전?
 TILT_INVERT = True  # 카메라가 사람 위쪽 볼 때 → 머리 위로?
+
+# === Breathing — 정지하지 않게 항상 미세 sine wave 추가 ===
+# 4초 주기로 위아래 ±1.5°, 5.7초 주기로 좌우 ±0.5° (소수 점 어긋난 주기 = 자연스러움)
+BREATH_TILT_AMP_DEG = 1.5
+BREATH_TILT_PERIOD_SEC = 4.0
+BREATH_PAN_AMP_DEG = 0.5
+BREATH_PAN_PERIOD_SEC = 5.7
+
+
+def _breathing_offsets(t: float) -> tuple[float, float]:
+    """현재 시각의 호흡 (pan_offset, tilt_offset)."""
+    pan = math.sin(t * 2 * math.pi / BREATH_PAN_PERIOD_SEC) * BREATH_PAN_AMP_DEG
+    tilt = math.sin(t * 2 * math.pi / BREATH_TILT_PERIOD_SEC) * BREATH_TILT_AMP_DEG
+    return pan, tilt
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -86,8 +102,13 @@ async def run_head_tracker(
         pan_current += (target_pan - pan_current) * SMOOTHING_ALPHA
         tilt_current += (target_tilt - tilt_current) * SMOOTHING_ALPHA
 
+        # 호흡 오프셋 — 항상 살아있는 미세 진동
+        breath_pan, breath_tilt = _breathing_offsets(time.monotonic())
+        out_pan = _clamp(pan_current + breath_pan, PAN_MIN_DEG, PAN_MAX_DEG)
+        out_tilt = _clamp(tilt_current + breath_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+
         try:
-            servos.set_angles(pan_current, tilt_current)
+            servos.set_angles(out_pan, out_tilt)
         except Exception as e:
             log.warning(f"servo set_angles 실패: {e}")
             await asyncio.sleep(1.0)
