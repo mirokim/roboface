@@ -29,12 +29,12 @@ class WaveDetector:
     def __init__(
         self,
         fps: float = 5.0,
-        history_sec: float = 2.5,
+        history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
         min_motion_pixels: int = 60,
         diff_threshold: int = 18,
         min_amplitude: float = 0.08,
-        min_zero_crossings: int = 3,
+        min_zero_crossings: int = 2,
         max_zero_crossings: int = 16,
     ) -> None:
         self.fps = fps
