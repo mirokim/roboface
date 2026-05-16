@@ -45,7 +45,7 @@ class WristWaveDetector:
     호출. 같은 인스턴스가 좌/우 손목 두 시계열 동시 관리.
     """
 
-    KP_CONF_THRESHOLD = 0.25   # 손목/어깨 keypoint 최소 신뢰도
+    KP_CONF_THRESHOLD = 0.10   # 손목/어깨 keypoint 최소 신뢰도 (HigherHRNet 분포 낮음)
 
     def __init__(
         self,
@@ -95,6 +95,17 @@ class WristWaveDetector:
         r_shoulder = keypoints[KP_R_SHOULDER]
         l_wrist = keypoints[KP_L_WRIST]
         r_wrist = keypoints[KP_R_WRIST]
+
+        # 진단 — 2초마다 keypoint confidence + 위치 출력
+        now_t = time.time()
+        if now_t - self._last_debug_log_at > 2.0:
+            self._last_debug_log_at = now_t
+            log.info(
+                f"wave kp: shoulder L={l_shoulder[2]:.2f} R={r_shoulder[2]:.2f} | "
+                f"wrist L={l_wrist[2]:.2f}({l_wrist[1]:.2f}) "
+                f"R={r_wrist[2]:.2f}({r_wrist[1]:.2f}) "
+                f"hist L={len(self.left_history)} R={len(self.right_history)}"
+            )
 
         shoulder_ok = (
             l_shoulder[2] >= self.KP_CONF_THRESHOLD

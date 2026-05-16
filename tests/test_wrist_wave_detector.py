@@ -68,7 +68,7 @@ def test_low_confidence_keypoint_ignored():
     det = WristWaveDetector(fps=10, history_sec=1.5)
     for i in range(30):
         wrist_x = 0.5 + math.sin(i * math.pi / 3) * 0.12
-        kps = _build_keypoints(wrist_x, wrist_y=0.3, conf=0.1)
+        kps = _build_keypoints(wrist_x, wrist_y=0.3, conf=0.05)
         assert not det.process(kps)
 
 
