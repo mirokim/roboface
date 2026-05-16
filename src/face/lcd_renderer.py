@@ -16,6 +16,7 @@ PIL Image로 변환 후 SPI로 LCD 전송.
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 # Pi 헤드리스에서 pygame이 SDL 디스플레이 없이 동작하도록
@@ -23,7 +24,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame  # noqa: E402
 
-from src.config import DISPLAY_HEIGHT, DISPLAY_WIDTH, FPS  # noqa: E402
+from src.config import DISPLAY_HEIGHT, DISPLAY_WIDTH  # noqa: E402
 from src.face.renderer import FaceState, draw_face_to_surface  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
@@ -36,7 +37,7 @@ class LCDRenderer:
     pygame Surface에 그린 후 SPI로 LCD 전송.
     """
 
-    def __init__(self, rotation: int = 90, baudrate: int = 24_000_000):
+    def __init__(self, rotation: int = 90, baudrate: int = 40_000_000):
         # Pi GPIO/SPI 의존성은 robot 모드에서만 import
         import board
         import digitalio
@@ -73,9 +74,6 @@ class LCDRenderer:
         pygame.display.set_mode((1, 1))   # SDL이 surface 만들려면 video init 필요
         self.canvas = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT))
 
-        # FPS 제한용
-        self.clock = pygame.time.Clock()
-
         # PIL Image — pygame surface → bytes → PIL → LCD
         from PIL import Image
         self._Image = Image
@@ -84,16 +82,23 @@ class LCDRenderer:
                  f"baud={baudrate / 1e6:.0f}MHz, {DISPLAY_WIDTH}×{DISPLAY_HEIGHT})")
 
     def render(self, face: FaceState) -> None:
+        """동기 렌더 (호환용) — SPI 전송이 이벤트 루프 블로킹."""
         draw_face_to_surface(self.canvas, face)
-
-        # pygame Surface → PIL Image
         raw = pygame.image.tostring(self.canvas, "RGB")
         pil = self._Image.frombytes("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), raw)
-
-        # LCD 전송 (rotation 적용된 ILI9341 객체)
         self.disp.image(pil)
 
-        self.clock.tick(FPS)
+    async def render_async(self, face: FaceState) -> None:
+        """비동기 렌더 — SPI 전송을 executor로 빼서 이벤트 루프 안 멈추게.
+
+        pygame 캔버스 그리기는 main thread (pygame이 thread-safe 아님),
+        SPI 전송만 백그라운드 thread.
+        """
+        draw_face_to_surface(self.canvas, face)
+        raw = pygame.image.tostring(self.canvas, "RGB")
+        pil = self._Image.frombytes("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), raw)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.disp.image, pil)
 
     def set_backlight(self, on: bool) -> None:
         self.bl.value = on

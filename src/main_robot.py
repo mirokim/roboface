@@ -157,8 +157,10 @@ async def run_robot() -> None:
                     ev, ctx, face, work_tracker, servos, perception,
                 )
             if lcd is not None:
-                lcd.render(face)
-            await asyncio.sleep(0.033)  # ~30 FPS
+                # SPI 전송 동안 다른 async task 진행 (dance, fake_speak 등)
+                await lcd.render_async(face)
+            else:
+                await asyncio.sleep(0.033)  # ~30 FPS
     finally:
         log.info("종료 중...")
         for t in bg_tasks:

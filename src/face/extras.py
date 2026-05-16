@@ -117,6 +117,11 @@ _BUBBLE_MAX_LINES = 2
 _BUBBLE_LINE_HEIGHT = 16   # 폰트 크기 + 여유
 _BUBBLE_RADIUS = 8
 
+# 말풍선은 같은 텍스트가 수십 프레임 반복 — 매 프레임 폰트 렌더링은 CPU 낭비.
+# 마지막 그린 (text, font_size) → 완성된 Surface 캐시.
+_BUBBLE_CACHE_KEY: tuple[str, int] | None = None
+_BUBBLE_CACHE_SURFACE: pygame.Surface | None = None
+
 
 def _wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
     """공백 단위로 줄바꿈 + 한 줄도 너무 길면 글자 단위로 잘라넣음."""
@@ -152,21 +157,13 @@ def _wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
     return lines
 
 
-def draw_speech_bubble(
-    canvas: pygame.Surface,
-    text: str,
-    *,
-    font_size: int = 13,
-) -> None:
-    """화면 상단에 말풍선 — 최대 2줄, 넘으면 …로 자름."""
-    if not text:
-        return
+def _build_bubble_surface(text: str, font_size: int) -> pygame.Surface:
+    """말풍선 한 장(투명 배경) 만들기 — 폰트 렌더링은 여기서만."""
     font = get_font(font_size)
     max_text_w = DISPLAY_WIDTH - 2 * (_BUBBLE_MARGIN + _BUBBLE_PADDING)
     lines = _wrap_text(text, font, max_text_w)
     if len(lines) > _BUBBLE_MAX_LINES:
         lines = lines[:_BUBBLE_MAX_LINES]
-        # 마지막 줄 끝에 …
         last = lines[-1]
         while font.size(last + "…")[0] > max_text_w and last:
             last = last[:-1]
@@ -176,26 +173,26 @@ def draw_speech_bubble(
     line_h = font.get_linesize()
     bubble_h = line_count * line_h + 2 * _BUBBLE_PADDING
     bubble_w = DISPLAY_WIDTH - 2 * _BUBBLE_MARGIN
-    bubble_rect = pygame.Rect(_BUBBLE_MARGIN, 4, bubble_w, bubble_h)
+    tail_h = 6
 
-    # 배경 (불투명 검정 — LCD 가독성)
-    pygame.draw.rect(canvas, COLOR_BG, bubble_rect, border_radius=_BUBBLE_RADIUS)
-    # 윤곽선 (흰색)
-    pygame.draw.rect(
-        canvas, COLOR_EYE, bubble_rect,
-        width=2, border_radius=_BUBBLE_RADIUS,
+    # 전체 합성용 surface (꼬리 포함 영역) — SRCALPHA로 투명
+    surf = pygame.Surface(
+        (DISPLAY_WIDTH, 4 + bubble_h + tail_h + 2),
+        pygame.SRCALPHA,
     )
-
-    # 텍스트
+    bubble_rect = pygame.Rect(_BUBBLE_MARGIN, 4, bubble_w, bubble_h)
+    pygame.draw.rect(surf, COLOR_BG, bubble_rect, border_radius=_BUBBLE_RADIUS)
+    pygame.draw.rect(
+        surf, COLOR_EYE, bubble_rect, width=2, border_radius=_BUBBLE_RADIUS,
+    )
     for i, line in enumerate(lines):
         rendered = font.render(line, True, COLOR_EYE)
         tx = bubble_rect.centerx - rendered.get_width() // 2
         ty = bubble_rect.top + _BUBBLE_PADDING + i * line_h
-        canvas.blit(rendered, (tx, ty))
+        surf.blit(rendered, (tx, ty))
 
-    # 꼬리 (말풍선 아래로 작은 삼각형)
+    # 꼬리
     tail_top_y = bubble_rect.bottom - 1
-    tail_h = 6
     tail_cx = DISPLAY_WIDTH // 2
     tail_w = 8
     pts = [
@@ -203,7 +200,27 @@ def draw_speech_bubble(
         (tail_cx + tail_w, tail_top_y),
         (tail_cx, tail_top_y + tail_h),
     ]
-    pygame.draw.polygon(canvas, COLOR_BG, pts)
-    # 양 옆 선만 흰색 (가운데는 박스와 연결)
-    pygame.draw.line(canvas, COLOR_EYE, pts[0], pts[2], 2)
-    pygame.draw.line(canvas, COLOR_EYE, pts[1], pts[2], 2)
+    pygame.draw.polygon(surf, COLOR_BG, pts)
+    pygame.draw.line(surf, COLOR_EYE, pts[0], pts[2], 2)
+    pygame.draw.line(surf, COLOR_EYE, pts[1], pts[2], 2)
+    return surf
+
+
+def draw_speech_bubble(
+    canvas: pygame.Surface,
+    text: str,
+    *,
+    font_size: int = 13,
+) -> None:
+    """화면 상단에 말풍선 — 최대 2줄, 넘으면 …로 자름.
+
+    같은 텍스트는 surface 캐싱해서 매 프레임 폰트 렌더 안 함 (CJK 폰트가 비쌈).
+    """
+    if not text:
+        return
+    global _BUBBLE_CACHE_KEY, _BUBBLE_CACHE_SURFACE
+    key = (text, font_size)
+    if _BUBBLE_CACHE_KEY != key or _BUBBLE_CACHE_SURFACE is None:
+        _BUBBLE_CACHE_SURFACE = _build_bubble_surface(text, font_size)
+        _BUBBLE_CACHE_KEY = key
+    canvas.blit(_BUBBLE_CACHE_SURFACE, (0, 0))
