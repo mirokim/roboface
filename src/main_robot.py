@@ -233,6 +233,10 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     face.apply_expression(HAPPY)
     ctx.transition(State.GREETING, face)
     greeting = _random.choice(_WAVE_GREETINGS)
+    # 말풍선은 task scheduling을 기다리지 않도록 여기서 즉시 띄움.
+    # mouth animation/TTS 본체는 백그라운드 task로 따로 돌림.
+    face.show_speech(greeting, max(0.5, len(greeting) * 0.06))
+    log.info(f"🗣️  {greeting}")
     speech_task = asyncio.create_task(fake_speak(face, greeting))
     try:
         if servos is not None:
