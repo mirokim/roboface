@@ -205,6 +205,10 @@ class IMX500Camera:
             ))
         return detections
 
+    # HigherHRNet 후처리 — 640x480 입력 (H, W) 기준
+    POSE_IMG_H = 480
+    POSE_IMG_W = 640
+
     def _get_pose_detections(self, metadata: dict) -> list[Detection]:
         """HigherHRNet 출력 → 17 keypoint per detected person."""
         import numpy as np
@@ -214,7 +218,14 @@ class IMX500Camera:
             return []
 
         try:
-            keypoints, scores, _boxes = self._pose_postprocess(outputs)
+            keypoints, scores, _boxes = self._pose_postprocess(
+                outputs=outputs,
+                img_size=(self.POSE_IMG_H, self.POSE_IMG_W),
+                img_w_pad=(0, 0),
+                img_h_pad=(0, 0),
+                detection_threshold=self.threshold,
+                network_postprocess=True,
+            )
         except Exception as e:
             log.debug(f"pose postprocess 실패: {e}")
             return []
@@ -223,12 +234,12 @@ class IMX500Camera:
             return []
 
         try:
-            # 모델 입력 좌표계 (288 wide × 384 tall) — 정규화 0~1로 변환
+            # keypoints는 img_size 좌표계 (640 W × 480 H) — 정규화 0~1로 변환
             kp_arr = np.reshape(
                 np.stack(keypoints, axis=0), (len(scores), 17, 3),
             ).astype(np.float32)
-            kp_arr[:, :, 0] /= 288.0   # x
-            kp_arr[:, :, 1] /= 384.0   # y
+            kp_arr[:, :, 0] /= float(self.POSE_IMG_W)   # x ÷ 640
+            kp_arr[:, :, 1] /= float(self.POSE_IMG_H)   # y ÷ 480
         except Exception as e:
             log.debug(f"pose reshape 실패: {e}")
             return []
