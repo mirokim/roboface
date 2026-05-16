@@ -45,10 +45,16 @@ class FaceState:
         if changed:
             eyes.trigger_blink(self.eye_state, time.time())
 
+    MIN_SPEECH_DISPLAY_SEC = 3.0
+
     def show_speech(self, text: str, duration_sec: float) -> None:
-        """발화 시작 시 호출 — 말풍선 표시 시작."""
+        """발화 시작 시 호출 — 말풍선 표시 시작.
+
+        실제 발화가 짧아도 최소 MIN_SPEECH_DISPLAY_SEC만큼은 유지.
+        """
         self.speech_text = text
-        self.speech_until = time.time() + duration_sec + 1.0  # 음성 끝나고 1초 더
+        hold = max(duration_sec + 1.0, self.MIN_SPEECH_DISPLAY_SEC)
+        self.speech_until = time.time() + hold
 
     def clear_speech(self) -> None:
         self.speech_text = None

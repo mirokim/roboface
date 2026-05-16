@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -125,6 +126,54 @@ def check_long_silence(ctx: StateContext) -> Optional[ProactiveTrigger]:
     return None
 
 
+# 잡담 멘트 풀 — LLM 없이도 자연스러운 한국어로 말 걸기.
+# 너무 attention-grabbing 하지 않게, 가벼운 톤 위주.
+_CHITCHAT_MESSAGES = (
+    "오늘은 좀 어때?",
+    "잘 지내고 있어?",
+    "뭐 재밌는 일 있었어?",
+    "괜찮아? 너무 무리하지 마.",
+    "물 한 잔 어때?",
+    "잠깐 하늘 한번 봐봐.",
+    "음악 틀고 일하면 더 잘 돼.",
+    "지금 뭐 하고 있어?",
+    "어깨 한번 펴봐.",
+    "잠깐 눈 좀 쉬자.",
+    "심호흡 한번 해볼래?",
+    "오늘 컨디션 어때?",
+    "기지개 한번 쫙 펴봐.",
+    "잘 하고 있어, 그 페이스 좋아.",
+    "조금 쉬어도 괜찮아.",
+    "맛있는 거 먹었어?",
+    "창문 좀 열어볼까?",
+    "허리 펴고 앉기.",
+)
+
+
+def check_chitchat(ctx: StateContext) -> Optional[ProactiveTrigger]:
+    """일정 간격으로 가벼운 잡담 — 사용자 곁에 있다는 느낌."""
+    if not _proactive_allowed(ctx):
+        return None
+    last = ctx.last_proactive_at or 0.0
+    silence_sec = time.time() - last
+    if silence_sec < BEHAVIOR.chitchat_min_interval_sec:
+        return None
+    # max 간격 지난 후엔 확정 발동, 그 사이엔 점진적 확률
+    if silence_sec >= BEHAVIOR.chitchat_max_interval_sec:
+        prob = 1.0
+    else:
+        span = BEHAVIOR.chitchat_max_interval_sec - BEHAVIOR.chitchat_min_interval_sec
+        prob = (silence_sec - BEHAVIOR.chitchat_min_interval_sec) / span
+    if random.random() > prob:
+        return None
+    return ProactiveTrigger(
+        kind="chitchat",
+        priority=1,
+        context={},
+        suggested_message=random.choice(_CHITCHAT_MESSAGES),
+    )
+
+
 # === 통합 평가 ===
 
 def evaluate_all(
@@ -144,6 +193,8 @@ def evaluate_all(
             triggers.append(w)
         if (s := check_long_silence(ctx)) is not None:
             triggers.append(s)
+        if (c := check_chitchat(ctx)) is not None:
+            triggers.append(c)
 
     triggers.sort(key=lambda t: -t.priority)
     return triggers

@@ -131,9 +131,13 @@ class BehaviorConfig:
     posture_strong_continuous_sec: int = 1200  # 20분
 
     # 능동 멘트 빈도 제한
-    proactive_min_silence_sec: int = 900    # 15분 침묵 후만
-    proactive_max_per_hour: int = 3
+    proactive_min_silence_sec: int = 180    # 3분 침묵 후 OK
+    proactive_max_per_hour: int = 12
     proactive_quiet_hours: tuple[int, int] = (22, 7)  # 밤 10시~아침 7시는 자제
+
+    # 잡담 (chit-chat) — long_silence보다 가볍게, 사용자 있을 때 짧게 말 걸기
+    chitchat_min_interval_sec: int = 240    # 마지막 발화 후 4분 지나면 후보
+    chitchat_max_interval_sec: int = 600    # 10분 안엔 무조건 한 번
 
     # 절전
     idle_screen_dim_after_sec: int = 300    # 5분 부재

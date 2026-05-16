@@ -28,6 +28,7 @@ _TRIGGER_EXPR = {
     "work_break_strong": WORRIED,
     "work_break_alarm": WORRIED,
     "long_silence": NEUTRAL,
+    "chitchat": HAPPY,
 }
 
 
