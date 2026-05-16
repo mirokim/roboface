@@ -96,31 +96,37 @@ class WristWaveDetector:
         l_wrist = keypoints[KP_L_WRIST]
         r_wrist = keypoints[KP_R_WRIST]
 
-        # 진단 — 2초마다 keypoint confidence + 위치 출력
-        now_t = time.time()
-        if now_t - self._last_debug_log_at > 2.0:
-            self._last_debug_log_at = now_t
-            log.info(
-                f"wave kp: shoulder L={l_shoulder[2]:.2f} R={r_shoulder[2]:.2f} | "
-                f"wrist L={l_wrist[2]:.2f}({l_wrist[1]:.2f}) "
-                f"R={r_wrist[2]:.2f}({r_wrist[1]:.2f}) "
-                f"hist L={len(self.left_history)} R={len(self.right_history)}"
-            )
-
         shoulder_ok = (
             l_shoulder[2] >= self.KP_CONF_THRESHOLD
             and r_shoulder[2] >= self.KP_CONF_THRESHOLD
         )
+
+        # 진단 — 2초마다 keypoint conf + y 좌표 + history 출력
+        now_t = time.time()
+        if now_t - self._last_debug_log_at > 2.0:
+            self._last_debug_log_at = now_t
+            sh_y_show = (
+                (l_shoulder[1] + r_shoulder[1]) / 2 if shoulder_ok else -1
+            )
+            log.info(
+                f"wave kp: shoulder L={l_shoulder[2]:.2f} R={r_shoulder[2]:.2f} "
+                f"(y={sh_y_show:.2f}) | "
+                f"wrist L={l_wrist[2]:.2f}(y={l_wrist[1]:.2f}) "
+                f"R={r_wrist[2]:.2f}(y={r_wrist[1]:.2f}) "
+                f"hist L={len(self.left_history)} R={len(self.right_history)}"
+            )
+
         if not shoulder_ok:
             return False
 
         shoulder_width = float(abs(l_shoulder[0] - r_shoulder[0]))
         if shoulder_width < 0.02:   # 너무 좁음 — 옆모습이거나 노이즈
             return False
-        # 인사 wave는 손이 어깨 위 — 어깨 y 평균보다 살짝 위
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
+        # 다리 모션 오인 방지. 어깨~가슴 정도까지 (정규화 0.4 = 화면 40%)는 wave 허용.
+        max_below = 0.4
 
-        # 손목 push: confidence 통과 AND 어깨 위에 있을 때만
+        # 손목 push: confidence 통과 AND 손목이 다리 높이는 아닐 때
         pushed_any = False
         for wrist, history in (
             (l_wrist, self.left_history),
@@ -128,8 +134,7 @@ class WristWaveDetector:
         ):
             if wrist[2] < self.KP_CONF_THRESHOLD:
                 continue
-            # y 좌표가 작을수록 화면 위쪽. 어깨보다 위(또는 비슷)에 손이 있을 때.
-            if wrist[1] > shoulder_y + 0.05:   # 어깨 한참 아래면 wave 아님
+            if wrist[1] > shoulder_y + max_below:   # 다리 높이 — 무시
                 continue
             history.append(float(wrist[0]))
             pushed_any = True

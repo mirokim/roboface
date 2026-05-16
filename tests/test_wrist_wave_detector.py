@@ -53,13 +53,13 @@ def test_static_wrist_not_detected():
         assert not det.process(kps)
 
 
-def test_wrist_below_shoulder_ignored():
-    """손이 어깨 아래에 있으면 wave 후보가 아님 (가만히 손 흔드는 거 인사 X)."""
+def test_wrist_at_leg_level_ignored():
+    """손목이 다리 높이(어깨에서 너무 멀리 아래)면 wave 후보 X."""
     det = WristWaveDetector(fps=10, history_sec=1.5)
     for i in range(30):
         wrist_x = 0.5 + math.sin(i * math.pi / 3) * 0.12
-        # 손목 y=0.7 (아래), 어깨 y=0.4 → 손목이 어깨보다 0.3 아래
-        kps = _build_keypoints(wrist_x, wrist_y=0.7)
+        # 어깨 y=0.4, 손목 y=0.95 → 0.55 아래 (다리 높이) — 무시되어야
+        kps = _build_keypoints(wrist_x, wrist_y=0.95)
         assert not det.process(kps)
 
 
