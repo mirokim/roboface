@@ -77,6 +77,7 @@ class WaveDetector:
         if self._prev_bbox is not None:
             dx = abs(bbox[0] - self._prev_bbox[0]) + abs(bbox[2] - self._prev_bbox[2])
             if dx > 0.25:
+                log.info(f"wave reset — bbox 점프 dx={dx:.2f}")
                 self.reset()
         self._prev_bbox = bbox
 
@@ -114,6 +115,16 @@ class WaveDetector:
 
         mask = diff > self.diff_threshold
         total_motion = int(mask.sum())
+
+        # 진단 — 2초마다 현재 motion / history 상태 INFO로 찍음
+        now = time.time()
+        if now - self._last_debug_log_at > 2.0:
+            self._last_debug_log_at = now
+            log.info(
+                f"wave proc motion={total_motion} (≥{self.min_motion_pixels} 필요) "
+                f"history={len(self.centroid_history)}/{self.history_max}"
+            )
+
         if total_motion < self.min_motion_pixels:
             # 정적 — push 안 함 (시계열에 noise 끼지 않게)
             return False
@@ -145,15 +156,11 @@ class WaveDetector:
         signs = np.sign(arr - median)
         zero_crossings = int(np.sum(np.abs(np.diff(signs)) > 0))
 
-        # 튜닝용 — 2초마다 현재 측정값 INFO로 찍어줌
-        now = time.time()
-        if now - self._last_debug_log_at > 2.0:
-            self._last_debug_log_at = now
-            log.info(
-                f"wave 후보 amp={amp:.3f} zero_crossings={zero_crossings} "
-                f"(필요: amp≥{self.min_amplitude}, "
-                f"zc {self.min_zero_crossings}~{self.max_zero_crossings})"
-            )
+        log.info(
+            f"wave eval amp={amp:.3f} zc={zero_crossings} "
+            f"(amp≥{self.min_amplitude}, zc {self.min_zero_crossings}~"
+            f"{self.max_zero_crossings})"
+        )
 
         if amp < self.min_amplitude:
             return False
