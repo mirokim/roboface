@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 
 from src.audio.fake_tts import speak as fake_speak
@@ -50,7 +51,13 @@ async def fire_trigger(
     if servos is not None:
         if trig.kind == "greeting":
             ctx.transition(State.GREETING, face)
-            motion_task = asyncio.create_task(poses.greeting(servos))
+            # 가끔 (25%) 짧은 댄스로 인사 — 그 외엔 일반 끄덕 인사
+            if random.random() < 0.25:
+                motion_task = asyncio.create_task(
+                    poses.dance(servos, face, bpm=130, beats=4)
+                )
+            else:
+                motion_task = asyncio.create_task(poses.greeting(servos))
         elif trig.kind.startswith("work_break"):
             motion_task = asyncio.create_task(poses.shake(servos, times=1))
 

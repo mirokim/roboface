@@ -26,8 +26,10 @@ from src.config import (
     PORCUPINE_KEYWORD,
     PORCUPINE_KEYWORD_PATH,
 )
-from src.face.expressions import FOCUSED, NEUTRAL
+from src.face.expressions import FOCUSED, HAPPY, NEUTRAL
 from src.face.renderer import FaceState
+from src.motion import poses
+from src.motion.servos import ServoController
 from src.utils.logger import get_logger
 
 log = get_logger("voice_assistant")
@@ -42,6 +44,7 @@ class VoiceAssistant:
         ctx: StateContext,
         face: FaceState,
         *,
+        servos: ServoController | None = None,
         mic_device: int | str | None = None,
         wake_keyword: str = "jarvis",
         wake_keyword_path: str | None = None,
@@ -49,6 +52,7 @@ class VoiceAssistant:
     ) -> None:
         self.ctx = ctx
         self.face = face
+        self.servos = servos
         self.mic_device = mic_device
         self.wake_keyword = wake_keyword
         self.wake_keyword_path = wake_keyword_path
@@ -160,6 +164,11 @@ class VoiceAssistant:
         self.history.append({"role": "user", "content": text})
         self.history = self.history[-_HISTORY_MAX_TURNS:]
 
+        # 사전 정의 명령 인터셉트 — Claude 거치지 않고 즉시 실행
+        if await self._maybe_handle_command(text):
+            self.ctx.transition(prev_state, self.face)
+            return
+
         # Claude 응답
         loop = asyncio.get_running_loop()
         reply = await loop.run_in_executor(
@@ -187,11 +196,36 @@ class VoiceAssistant:
             self.ctx.transition(State.IDLE, self.face)
 
 
-async def run_voice_assistant(ctx: StateContext, face: FaceState) -> None:
+    async def _maybe_handle_command(self, text: str) -> bool:
+        """사전 정의 음성 명령 인터셉트. 처리되면 True."""
+        t = text.lower().strip().rstrip("!?.,")
+        # 댄스 명령
+        dance_keywords = ("춤춰", "춤 춰", "춤추자", "춤줘", "댄스", "dance")
+        if any(k in t for k in dance_keywords):
+            log.info("🎵 댄스 명령 인식")
+            self.ctx.transition(State.TALKING, self.face)
+            self.face.apply_expression(HAPPY)
+            if self.servos is not None:
+                await poses.dance(self.servos, self.face, bpm=120, beats=8)
+            else:
+                # 서보 없으면 표정/입만 사이클
+                from src.motion.poses import dance  # type: ignore[unused-import]
+                log.info("서보 없음 — 댄스 모션 스킵, 표정만")
+                await asyncio.sleep(2.0)
+            return True
+        return False
+
+
+async def run_voice_assistant(
+    ctx: StateContext,
+    face: FaceState,
+    servos: ServoController | None = None,
+) -> None:
     """main_robot에서 task로 시작하는 진입점."""
     va = VoiceAssistant(
         ctx,
         face,
+        servos=servos,
         mic_device=AUDIO_INPUT_DEVICE,
         wake_keyword=PORCUPINE_KEYWORD,
         wake_keyword_path=PORCUPINE_KEYWORD_PATH,

@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import random
+import time
 
 from src.config import PAN_CENTER_DEG, TILT_CENTER_DEG
+from src.face import expressions as expr
+from src.face.expressions import MouthShape
+from src.face.renderer import FaceState
 from src.motion.servos import ServoController
+from src.utils.logger import get_logger
+
+log = get_logger("poses")
 
 
 async def nod(servos: ServoController, times: int = 2) -> None:
@@ -47,3 +56,98 @@ async def tilt_curious(servos: ServoController) -> None:
 async def home(servos: ServoController) -> None:
     """중앙으로 복귀."""
     await servos.smooth_to_async(PAN_CENTER_DEG, TILT_CENTER_DEG, 0.5)
+
+
+# === 댄스 ===
+_DANCE_EXPRESSIONS = [
+    expr.HAPPY,
+    expr.EXCITED,
+    expr.STARSTRUCK,
+    expr.LOVE,
+    expr.WINK,
+    expr.WINK_R,
+    expr.PROUD,
+    expr.CONTENT,
+]
+
+_DANCE_MOUTHS = [
+    MouthShape.SMILE,
+    MouthShape.GRIN,
+    MouthShape.OPEN_SMALL,
+    MouthShape.OPEN_MID,
+    MouthShape.OPEN_LARGE,
+    MouthShape.O,
+]
+
+
+async def dance(
+    servos: ServoController,
+    face: FaceState,
+    *,
+    bpm: int = 120,
+    beats: int = 8,
+    pan_amp_deg: float = 25.0,
+    tilt_amp_deg: float = 10.0,
+    update_hz: int = 30,
+) -> None:
+    """춤추는 듯한 머리 흔들기 + 표정/입 사이클.
+
+    pan은 1박자 sine wave, tilt는 2배 빠른 bob.
+    매 beat마다 mouth 변경, 매 2 beats마다 expression 변경.
+    시작/끝은 ease-in/out envelope으로 자연스럽게.
+    """
+    log.info(f"💃 dance: {bpm} BPM × {beats} beats")
+    period = 60.0 / bpm
+    total = period * beats
+    dt = 1.0 / update_hz
+
+    saved_expr = face.expression
+    saved_mouth = face.mouth_state.shape
+    saved_amp = face.mouth_state.talk_amplitude
+
+    expr_idx = random.randint(0, len(_DANCE_EXPRESSIONS) - 1)
+    last_beat = -1
+
+    start = time.monotonic()
+    try:
+        while True:
+            t = time.monotonic() - start
+            if t > total:
+                break
+
+            phase = (t / period) * 2 * math.pi
+            # envelope — 처음 한 박자 fade-in, 끝 한 박자 fade-out
+            env = min(1.0, t / period) * min(1.0, (total - t) / period)
+            env = max(0.0, env)
+
+            d_pan = math.sin(phase) * pan_amp_deg * env
+            # tilt는 2배 빠른 head bob (위→아래)
+            d_tilt = math.sin(phase * 2 + math.pi / 2) * tilt_amp_deg * env * 0.6
+
+            servos.set_angles(
+                PAN_CENTER_DEG + d_pan,
+                TILT_CENTER_DEG + d_tilt,
+            )
+
+            cur_beat = int(t / period)
+            if cur_beat != last_beat:
+                last_beat = cur_beat
+                # 매 beat — 입 모양 바꿈
+                face.mouth_state.shape = random.choice(_DANCE_MOUTHS)
+                face.mouth_state.talk_amplitude = random.uniform(0.5, 1.0)
+                # 매 2 beats — 표정 바꿈 (mouth는 다시 expression 기본값으로 덮이지 않게
+                # apply_expression 후 mouth만 재설정)
+                if cur_beat % 2 == 0:
+                    next_expr = _DANCE_EXPRESSIONS[expr_idx % len(_DANCE_EXPRESSIONS)]
+                    expr_idx += 1
+                    face.apply_expression(next_expr)
+                    face.mouth_state.shape = random.choice(_DANCE_MOUTHS)
+
+            await asyncio.sleep(dt)
+    finally:
+        # 입/표정 복귀
+        face.mouth_state.talk_amplitude = saved_amp
+        face.mouth_state.shape = saved_mouth
+        face.apply_expression(saved_expr)
+        # 머리 중앙으로
+        await servos.smooth_to_async(PAN_CENTER_DEG, TILT_CENTER_DEG, 0.4)

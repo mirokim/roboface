@@ -96,7 +96,7 @@ async def run_robot() -> None:
         ),
         # 음성 어시스턴트 — wake word → STT → Claude → TTS
         asyncio.create_task(
-            run_voice_assistant(ctx, face),
+            run_voice_assistant(ctx, face, servos=servos),
             name="voice_assistant",
         ),
     ]
