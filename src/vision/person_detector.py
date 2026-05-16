@@ -37,6 +37,7 @@ class PersonDetector:
     person_class: str = "person"
     confirm_frames: int = 3       # AWAY → PRESENT 전이에 필요한 연속 감지 프레임
     away_timeout_sec: float = 5.0  # 마지막 감지 후 N초 미감지면 AWAY
+    min_confidence: float = 0.5   # 사람 인정 최소 신뢰도 (pose 모드는 0.3 권장)
 
     # 내부 상태
     state: PresenceState = PresenceState.AWAY
@@ -50,7 +51,7 @@ class PersonDetector:
         events: list[SensorEvent] = []
 
         person_seen = any(
-            d.class_name == self.person_class and d.confidence >= 0.5
+            d.class_name == self.person_class and d.confidence >= self.min_confidence
             for d in detections
         )
 

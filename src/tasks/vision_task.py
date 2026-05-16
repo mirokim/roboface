@@ -42,7 +42,9 @@ async def run_vision(
         log.warning(f"AI Camera 초기화 실패 (mode={VISION_MODE}) — vision task 건너뜀: {e}")
         return
 
-    detector = PersonDetector()
+    detector = PersonDetector(
+        min_confidence=0.3 if VISION_MODE == "pose" else 0.5,
+    )
     wave_detector: WaveDetector | WristWaveDetector
     if VISION_MODE == "pose":
         wave_detector = WristWaveDetector(fps=getattr(cam, "target_fps", 5.0))
@@ -60,6 +62,9 @@ async def run_vision(
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
+        # pose 모드 점수는 보통 0.3~0.5, detect 모드는 0.5+ → 모드별 필터링
+        person_filter_conf = 0.3 if VISION_MODE == "pose" else 0.5
+
         async for detections in cam.stream():
             events = detector.process(detections)
             for ev in events:
@@ -70,7 +75,7 @@ async def run_vision(
             if perception is not None:
                 person_dets = [
                     d for d in detections
-                    if d.class_name == "person" and d.confidence >= 0.5
+                    if d.class_name == "person" and d.confidence >= person_filter_conf
                 ]
                 if person_dets:
                     biggest = max(
