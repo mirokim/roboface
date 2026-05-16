@@ -75,16 +75,20 @@ def test_ignores_linear_drift():
     assert hits == 0
 
 
-def test_reset_on_no_bbox():
+def test_no_reset_on_brief_none_bbox():
+    """짧은 person 인식 깜빡임에는 history 유지 (vision_task가 1.5s grace로 명시 reset)."""
     det = WaveDetector(fps=10)
     bbox = (0.1, 0.05, 0.9, 0.95)
     w, h = 160, 240
-    # 몇 프레임 push
     for i in range(5):
         det.process(_frame_with_blob(w, h, 80 + i * 5, 50), bbox)
-    assert len(det.centroid_history) > 0
-    # bbox=None 호출 → 초기화
+    history_before = len(det.centroid_history)
+    assert history_before > 0
+    # bbox=None 호출 — history 그대로 유지
     det.process(_frame_with_blob(w, h, 80, 50), None)
+    assert len(det.centroid_history) == history_before
+    # 명시적 reset 호출 시에만 초기화
+    det.reset()
     assert len(det.centroid_history) == 0
     assert det._prev_gray is None
 

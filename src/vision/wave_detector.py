@@ -31,14 +31,16 @@ class WaveDetector:
         fps: float = 5.0,
         history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
-        min_motion_pixels: int = 60,
-        diff_threshold: int = 18,
+        min_motion_pixels: int = 25,
+        diff_threshold: int = 15,
         min_amplitude: float = 0.08,
-        min_zero_crossings: int = 2,
+        min_zero_crossings: int = 3,
         max_zero_crossings: int = 16,
+        min_eval_frames: int = 6,
     ) -> None:
         self.fps = fps
-        self.history_max = max(8, int(fps * history_sec))
+        self.history_max = max(min_eval_frames, int(fps * history_sec))
+        self.min_eval_frames = min_eval_frames
         self.cooldown_sec = cooldown_sec
         self.min_motion_pixels = min_motion_pixels
         self.diff_threshold = diff_threshold
@@ -63,8 +65,9 @@ class WaveDetector:
         bbox: tuple[float, float, float, float] | None,
     ) -> bool:
         """frame: numpy HxWx{3 or 4} or HxW. bbox: 정규화 0~1. 감지되면 True."""
+        # 프레임 한두 개 빠져도 history는 유지 (vision_task 1.5초 grace로 보완).
+        # 정말로 사라지면 vision_task에서 wave_detector.reset() 명시적 호출.
         if frame is None or bbox is None:
-            self.reset()
             return False
 
         # numpy는 robot 모드에서만 사용 — 지연 import
@@ -139,8 +142,8 @@ class WaveDetector:
 
         self.centroid_history.append(centroid)
 
-        # 충분히 모이지 않았으면 판단 보류
-        if len(self.centroid_history) < self.history_max:
+        # 최소 평가 가능 프레임 수 모이면 시도 (history_max에 도달 안 해도 OK)
+        if len(self.centroid_history) < self.min_eval_frames:
             return False
 
         # cooldown
