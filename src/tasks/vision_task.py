@@ -7,9 +7,10 @@ import time
 from collections.abc import Callable
 
 from src.brain.perception import PerceptionState
-from src.sensors.base import SensorEvent
+from src.sensors.base import SensorEvent, SensorEventType
 from src.utils.logger import get_logger
 from src.vision.person_detector import PersonDetector
+from src.vision.wave_detector import WaveDetector
 
 log = get_logger("vision_task")
 
@@ -32,7 +33,8 @@ async def run_vision(
         return
 
     detector = PersonDetector()
-    log.info("vision task 시작 (IMX500 person detection)")
+    wave_detector = WaveDetector(fps=getattr(cam, "target_fps", 5.0))
+    log.info("vision task 시작 (IMX500 person detection + wave detector)")
 
     try:
         async for detections in cam.stream():
@@ -41,6 +43,7 @@ async def run_vision(
                 emit_event(ev)
 
             # PerceptionState 업데이트 — 사람 위치/거리 매 프레임 추적
+            person_bbox: tuple[float, float, float, float] | None = None
             if perception is not None:
                 person_dets = [
                     d for d in detections
@@ -55,11 +58,26 @@ async def run_vision(
                         bbox=biggest.bbox,
                         distance_cm=detector._last_distance or -1.0,
                     )
+                    person_bbox = biggest.bbox
                 elif (
                     perception.person_present
                     and time.time() - perception.last_person_seen_at > detector.away_timeout_sec
                 ):
                     perception.clear_person()
+
+            # 손 흔들기 감지 — 사람이 보이는 경우에만
+            if person_bbox is not None:
+                try:
+                    frame = cam.get_main_frame()
+                    if wave_detector.process(frame, person_bbox):
+                        emit_event(SensorEvent(
+                            type=SensorEventType.GESTURE_WAVE,
+                            data={"bbox": person_bbox},
+                        ))
+                except Exception as e:
+                    log.debug(f"wave detection 에러: {e}")
+            else:
+                wave_detector.reset()
     except asyncio.CancelledError:
         log.info("vision task 취소 요청")
         raise

@@ -17,6 +17,7 @@ class SensorEventType(Enum):
     ENV_TEMP = "env_temp"                  # 온도 측정
     ENV_HUMIDITY = "env_humidity"          # 습도 측정
     ENV_ALERT = "env_alert"                # 환경 급변
+    GESTURE_WAVE = "gesture_wave"          # 손 흔들기 감지
 
 
 @dataclass

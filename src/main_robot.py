@@ -125,7 +125,7 @@ async def run_robot() -> None:
         # 메인 루프: 센서 이벤트 처리 + LCD 렌더 + 상태 머신
         while not stop_event.is_set():
             for ev in sensors.drain_events():
-                _handle_sensor_event(ev, ctx, face, work_tracker)
+                _handle_sensor_event(ev, ctx, face, work_tracker, servos)
             if lcd is not None:
                 lcd.render(face)
             await asyncio.sleep(0.033)  # ~30 FPS
@@ -149,6 +149,7 @@ def _handle_sensor_event(
     ctx: StateContext,
     face: FaceState,
     work_tracker: WorkTracker,
+    servos=None,
 ) -> None:
     work_tracker.on_event(ev, ctx)
     if ev.type == SensorEventType.PRESENCE_NEW:
@@ -162,6 +163,32 @@ def _handle_sensor_event(
             ctx.transition(State.IDLE, face)
     elif ev.type == SensorEventType.ENV_TEMP:
         memory.log_env(ev.data["value"], 0.0)
+    elif ev.type == SensorEventType.GESTURE_WAVE:
+        log.info("👋 wave 응답 시작")
+        asyncio.create_task(_wave_back(ctx, face, servos))
+
+
+async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
+    """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스로 답례."""
+    # 이미 다른 인터랙션 중이면 양보
+    if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
+        return
+    prev_state = ctx.state
+    from src.face.expressions import HAPPY
+    face.apply_expression(HAPPY)
+    ctx.transition(State.GREETING, face)
+    try:
+        if servos is not None:
+            from src.motion import poses
+            await poses.dance(servos, face, bpm=140, beats=4)
+        else:
+            await asyncio.sleep(1.5)
+    finally:
+        # 사용자 보이면 watching, 아니면 idle
+        ctx.transition(
+            State.WATCHING if ctx.user_present else State.IDLE,
+            face,
+        )
 
 
 def main() -> None:

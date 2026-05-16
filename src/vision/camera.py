@@ -163,6 +163,17 @@ class IMX500Camera:
             yield detections
             await asyncio.sleep(period)
 
+    def get_main_frame(self):
+        """현재 main stream의 raw RGB 프레임 (HxWx3 numpy uint8) 또는 None.
+
+        wave_detector 같은 사후 분석용. detection metadata와는 별도 stream.
+        """
+        try:
+            return self.cam.capture_array("main")
+        except Exception as e:
+            log.debug(f"capture_array 실패: {e}")
+            return None
+
     def close(self) -> None:
         try:
             self.cam.stop()
