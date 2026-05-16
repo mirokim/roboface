@@ -20,6 +20,7 @@ from src.vision.person_detector import PersonDetector
 from src.vision.pose_gestures import (
     HandsUpDetector, HeadNodDetector, HeadShakeDetector,
 )
+from src.vision.pose_stabilizer import PoseStabilizer
 from src.vision.wave_detector import WaveDetector
 from src.vision.wrist_wave_detector import WristWaveDetector
 
@@ -48,16 +49,18 @@ async def run_vision(
     detector = PersonDetector(
         min_confidence=0.1 if VISION_MODE == "pose" else 0.5,
     )
-    fps = getattr(cam, "target_fps", 5.0)
+    fps = getattr(cam, "target_fps", 10.0)
     wave_detector: WaveDetector | WristWaveDetector
     hands_up_detector: HandsUpDetector | None = None
     head_nod_detector: HeadNodDetector | None = None
     head_shake_detector: HeadShakeDetector | None = None
+    pose_stab: PoseStabilizer | None = None
     if VISION_MODE == "pose":
         wave_detector = WristWaveDetector(fps=fps)
         hands_up_detector = HandsUpDetector(fps=fps)
         head_nod_detector = HeadNodDetector(fps=fps)
         head_shake_detector = HeadShakeDetector(fps=fps)
+        pose_stab = PoseStabilizer(fps=fps)
     else:
         wave_detector = WaveDetector(fps=fps)
     emotion_mirror = EmotionMirror() if face is not None else None
@@ -109,7 +112,16 @@ async def run_vision(
                         distance_cm=cur_dist,
                     )
                     person_bbox = biggest.bbox
-                    last_keypoints = biggest.keypoints
+                    # pose 모드: stabilizer로 keypoints 스무딩
+                    if pose_stab is not None:
+                        last_keypoints = pose_stab.update(
+                            biggest.keypoints, biggest.confidence,
+                        )
+                    else:
+                        last_keypoints = biggest.keypoints
+                elif pose_stab is not None:
+                    # 사람 없음 — score history에 0 push해서 lock 자연스럽게 풀림
+                    pose_stab.update(None, 0.0)
 
                     # 거리 변화 멘트 — 30cm 이상 변화 시
                     if (cur_dist > 0 and last_distance_for_comment is not None
@@ -161,9 +173,14 @@ async def run_vision(
             if effective_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
+                    # 제스처 emit 게이트: pose 모드는 stabilizer가 lock된 상태에서만.
+                    # detect 모드는 항상 person_confirmed 시 통과.
+                    gesture_gate_ok = person_confirmed_this_frame and (
+                        pose_stab is None or pose_stab.is_locked
+                    )
                     # wave 감지 — pose 모드는 wrist keypoint, detect 모드는 motion
                     wave_detected = False
-                    if person_confirmed_this_frame:
+                    if gesture_gate_ok:
                         if isinstance(wave_detector, WristWaveDetector):
                             wave_detected = wave_detector.process(last_keypoints)
                         else:
@@ -175,8 +192,8 @@ async def run_vision(
                             type=SensorEventType.GESTURE_WAVE,
                             data={"bbox": effective_bbox},
                         ))
-                    # pose 모드: 추가 제스처들
-                    if (person_confirmed_this_frame and last_keypoints is not None
+                    # pose 모드: 추가 제스처들 (lock된 상태에서만)
+                    if (gesture_gate_ok and last_keypoints is not None
                             and hands_up_detector is not None):
                         if hands_up_detector.process(last_keypoints):
                             emit_event(SensorEvent(
@@ -247,6 +264,10 @@ async def run_vision(
                     log.warning(f"vision frame 분석 에러: {e}")
             else:
                 wave_detector.reset()
+                if pose_stab is not None:
+                    pose_stab.reset()
+                if hands_up_detector is not None:
+                    hands_up_detector.reset()
                 last_recognized = None
                 last_distance_for_comment = None
                 if ctx is not None and ctx.user_name:

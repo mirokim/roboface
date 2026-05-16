@@ -102,7 +102,7 @@ class IMX500Camera:
         self,
         model_path: str | None = None,
         confidence_threshold: float | None = None,
-        target_fps: float = 5.0,
+        target_fps: float = 10.0,
         mode: str = "detect",
     ):
         # pose 모드 score는 매우 낮은 경우 많음 (HigherHRNet 특성). 일단 낮게.
