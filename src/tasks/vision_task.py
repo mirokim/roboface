@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import StateContext
-from src.config import DATA_DIR
+from src.config import DATA_DIR, VISION_MODE
 from src.face.renderer import FaceState
 from src.sensors.base import SensorEvent, SensorEventType
 from src.tasks import behavior_speaker
@@ -18,6 +18,7 @@ from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision.wave_detector import WaveDetector
+from src.vision.wrist_wave_detector import WristWaveDetector
 
 log = get_logger("vision_task")
 
@@ -36,22 +37,27 @@ async def run_vision(
         return
 
     try:
-        cam = IMX500Camera()
+        cam = IMX500Camera(mode=VISION_MODE)
     except Exception as e:
-        log.warning(f"AI Camera 초기화 실패 — vision task 건너뜀: {e}")
+        log.warning(f"AI Camera 초기화 실패 (mode={VISION_MODE}) — vision task 건너뜀: {e}")
         return
 
     detector = PersonDetector()
-    wave_detector = WaveDetector(fps=getattr(cam, "target_fps", 5.0))
+    wave_detector: WaveDetector | WristWaveDetector
+    if VISION_MODE == "pose":
+        wave_detector = WristWaveDetector(fps=getattr(cam, "target_fps", 5.0))
+    else:
+        wave_detector = WaveDetector(fps=getattr(cam, "target_fps", 5.0))
     emotion_mirror = EmotionMirror() if face is not None else None
     face_memory = FaceMemory(DATA_DIR / "faces.db") if ctx is not None else None
     last_recognized: str | None = None
     last_recognize_at = 0.0
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
+    last_keypoints = None
     # 거리 변화 감지 — 30cm 이상 가까워지거나 멀어지면 멘트
     last_distance_for_comment: float | None = None
-    log.info("vision task 시작 (IMX500 + wave + emotion + face memory)")
+    log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
         async for detections in cam.stream():
@@ -77,6 +83,7 @@ async def run_vision(
                         distance_cm=cur_dist,
                     )
                     person_bbox = biggest.bbox
+                    last_keypoints = biggest.keypoints
 
                     # 거리 변화 멘트 — 30cm 이상 변화 시
                     if (cur_dist > 0 and last_distance_for_comment is not None
@@ -128,9 +135,16 @@ async def run_vision(
             if effective_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
-                    if person_confirmed_this_frame and wave_detector.process(
-                        frame, effective_bbox,
-                    ):
+                    # wave 감지 — pose 모드는 wrist keypoint, detect 모드는 motion
+                    wave_detected = False
+                    if person_confirmed_this_frame:
+                        if isinstance(wave_detector, WristWaveDetector):
+                            wave_detected = wave_detector.process(last_keypoints)
+                        else:
+                            wave_detected = wave_detector.process(
+                                frame, effective_bbox,
+                            )
+                    if wave_detected:
                         emit_event(SensorEvent(
                             type=SensorEventType.GESTURE_WAVE,
                             data={"bbox": effective_bbox},

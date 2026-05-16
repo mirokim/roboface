@@ -21,6 +21,11 @@ Mode = Literal["simulator", "robot"]
 # === 모드 ===
 MODE: Mode = os.getenv("ROBOFACE_MODE", "simulator")  # type: ignore[assignment]
 
+# 비전 모델 — "detect" (SSD MobileNet, 객체 감지) 또는 "pose" (HigherHRNet, 자세 추정).
+# pose: 손 흔들기를 손목 좌표로 직접 트래킹 — 훨씬 정확하지만 HigherHRNet 모델 필요
+# detect: 기존. person 감지만, wave는 motion-based.
+VISION_MODE = os.getenv("VISION_MODE", "pose")
+
 # === 디스플레이 (LCD or Pygame 창) ===
 # 2.4" LCD 네이티브는 240×320(세로)지만, 로봇은 90° 회전해서 320×240(가로)로 사용
 # (Stack-chan 정통 방향)

@@ -1,14 +1,24 @@
 """AI Camera (Sony IMX500) 래퍼 — picamera2 + 온칩 NPU.
 
-객체 감지 결과를 stream으로 제공. Pi CPU 부담 거의 없음.
+두 모드 지원:
+- mode="detect" (기본): SSD MobileNet으로 객체 감지. detections로 person bbox 추출.
+- mode="pose": HigherHRNet으로 자세 추정. detections 안의 keypoints에 17개 COCO
+  관절 (x, y, confidence) 포함. bbox는 keypoints의 minmax로 자동 계산.
 
 사용 예:
-    cam = IMX500Camera()
-    for detections in cam.stream():
+    cam = IMX500Camera(mode="pose")
+    async for detections in cam.stream():
         for d in detections:
-            print(d.class_name, d.confidence, d.bbox)
+            if d.keypoints is not None:
+                left_wrist = d.keypoints[9]   # COCO idx 9 = 왼손목
+                right_wrist = d.keypoints[10] # idx 10 = 오른손목
 
-기본 모델: MobileNet SSD (COCO 80 classes, "person" 포함).
+COCO 17 keypoint 순서:
+0=nose, 1=l_eye, 2=r_eye, 3=l_ear, 4=r_ear,
+5=l_shoulder, 6=r_shoulder, 7=l_elbow, 8=r_elbow,
+9=l_wrist, 10=r_wrist, 11=l_hip, 12=r_hip,
+13=l_knee, 14=r_knee, 15=l_ankle, 16=r_ankle
+
 모델 파일은 imx500-all apt 패키지로 설치됨 (`/usr/share/imx500-models/`).
 """
 
@@ -29,6 +39,21 @@ log = get_logger("camera")
 DEFAULT_MODEL_PATH = (
     "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 )
+
+POSE_MODEL_PATH = (
+    "/usr/share/imx500-models/imx500_network_higherhrnet_coco.rpk"
+)
+
+# COCO 17 keypoint 인덱스
+KP_NOSE = 0
+KP_L_EYE, KP_R_EYE = 1, 2
+KP_L_EAR, KP_R_EAR = 3, 4
+KP_L_SHOULDER, KP_R_SHOULDER = 5, 6
+KP_L_ELBOW, KP_R_ELBOW = 7, 8
+KP_L_WRIST, KP_R_WRIST = 9, 10
+KP_L_HIP, KP_R_HIP = 11, 12
+KP_L_KNEE, KP_R_KNEE = 13, 14
+KP_L_ANKLE, KP_R_ANKLE = 15, 16
 
 # COCO class names (MobileNet SSD 기본 클래스). 모델이 label 파일을 제공하면 그게 우선.
 COCO_CLASSES = [
@@ -51,38 +76,51 @@ COCO_CLASSES = [
 
 @dataclass
 class Detection:
-    """단일 객체 감지 결과."""
+    """단일 객체 감지 결과 (객체 감지 or 자세 추정)."""
 
     class_id: int
     class_name: str
     confidence: float
     bbox: tuple[float, float, float, float]  # (x0, y0, x1, y1) 정규화 0~1
     timestamp: float = field(default_factory=time.time)
+    # 자세 추정 모드일 때 17개 COCO keypoint: shape (17, 3) — (x, y, conf) 정규화 0~1
+    keypoints: Any = None
 
     def __repr__(self) -> str:
+        suffix = " +kp" if self.keypoints is not None else ""
         return (f"Detection({self.class_name} {self.confidence:.2f} "
-                f"@ {self.bbox})")
+                f"@ {self.bbox}{suffix})")
 
 
 class IMX500Camera:
-    """IMX500 AI Camera 추론 스트림."""
+    """IMX500 AI Camera 추론 스트림.
+
+    mode: "detect" (객체 감지, SSD MobileNet) 또는 "pose" (자세 추정, HigherHRNet).
+    """
 
     def __init__(
         self,
-        model_path: str = DEFAULT_MODEL_PATH,
+        model_path: str | None = None,
         confidence_threshold: float = 0.5,
         target_fps: float = 5.0,
+        mode: str = "detect",
     ):
+        if mode not in ("detect", "pose"):
+            raise ValueError(f"mode는 'detect' 또는 'pose' (got '{mode}')")
+        if model_path is None:
+            model_path = POSE_MODEL_PATH if mode == "pose" else DEFAULT_MODEL_PATH
         if not Path(model_path).exists():
+            hint = "imx500-all" if mode == "detect" else "imx500-models"
             raise FileNotFoundError(
                 f"IMX500 model not found: {model_path}\n"
-                "  → sudo apt install -y imx500-all"
+                f"  → sudo apt install -y {hint}"
             )
 
         # robot 모드에서만 의존성 import
         from picamera2 import Picamera2
         from picamera2.devices import IMX500
 
+        self.mode = mode
         self.imx500 = IMX500(model_path)
         self.cam = Picamera2(self.imx500.camera_num)
         config = self.cam.create_preview_configuration(
@@ -96,15 +134,28 @@ class IMX500Camera:
             pass
         self.cam.start(config, show_preview=False)
 
-        # 클래스 라벨 로드
+        # 클래스 라벨 — pose 모드는 항상 person
         intrinsics = getattr(self.imx500, "network_intrinsics", None)
         labels = getattr(intrinsics, "labels", None) if intrinsics else None
         self.labels: list[str] = labels if labels else COCO_CLASSES
 
+        # pose post-processor lazy import
+        self._pose_postprocess = None
+        if mode == "pose":
+            try:
+                from picamera2.devices.imx500.postprocess_higherhrnet import (
+                    postprocess_higherhrnet,
+                )
+                self._pose_postprocess = postprocess_higherhrnet
+            except ImportError as e:
+                raise RuntimeError(
+                    f"pose 모드는 picamera2 postprocess_higherhrnet 필요: {e}"
+                ) from e
+
         self.threshold = confidence_threshold
         self.target_fps = target_fps
 
-        log.info(f"IMX500 카메라 초기화 완료 ({model_path}, "
+        log.info(f"IMX500 카메라 초기화 완료 ({model_path}, mode={mode}, "
                  f"threshold={confidence_threshold}, target_fps={target_fps})")
 
     def _get_detections(self) -> list[Detection]:
@@ -115,6 +166,11 @@ class IMX500Camera:
             log.debug(f"메타데이터 캡처 실패: {e}")
             return []
 
+        if self.mode == "pose":
+            return self._get_pose_detections(metadata)
+        return self._get_object_detections(metadata)
+
+    def _get_object_detections(self, metadata: dict) -> list[Detection]:
         outputs = self.imx500.get_outputs(metadata, add_batch=True)
         if outputs is None or len(outputs) < 3:
             return []
@@ -146,6 +202,58 @@ class IMX500Camera:
                 class_name=name,
                 confidence=conf,
                 bbox=bbox,
+            ))
+        return detections
+
+    def _get_pose_detections(self, metadata: dict) -> list[Detection]:
+        """HigherHRNet 출력 → 17 keypoint per detected person."""
+        import numpy as np
+
+        outputs = self.imx500.get_outputs(metadata, add_batch=True)
+        if outputs is None:
+            return []
+
+        try:
+            keypoints, scores, _boxes = self._pose_postprocess(outputs)
+        except Exception as e:
+            log.debug(f"pose postprocess 실패: {e}")
+            return []
+
+        if scores is None or len(scores) == 0:
+            return []
+
+        try:
+            # 모델 입력 좌표계 (288 wide × 384 tall) — 정규화 0~1로 변환
+            kp_arr = np.reshape(
+                np.stack(keypoints, axis=0), (len(scores), 17, 3),
+            ).astype(np.float32)
+            kp_arr[:, :, 0] /= 288.0   # x
+            kp_arr[:, :, 1] /= 384.0   # y
+        except Exception as e:
+            log.debug(f"pose reshape 실패: {e}")
+            return []
+
+        detections: list[Detection] = []
+        for i, score in enumerate(scores):
+            conf = float(score)
+            if conf < self.threshold:
+                continue
+            kps = kp_arr[i]  # (17, 3)
+            # bbox: 신뢰도 있는 keypoint들의 minmax (없으면 전체)
+            valid = kps[kps[:, 2] >= 0.2]
+            if len(valid) >= 3:
+                x0 = float(valid[:, 0].min())
+                y0 = float(valid[:, 1].min())
+                x1 = float(valid[:, 0].max())
+                y1 = float(valid[:, 1].max())
+            else:
+                x0, y0, x1, y1 = 0.0, 0.0, 1.0, 1.0
+            detections.append(Detection(
+                class_id=0,
+                class_name="person",
+                confidence=conf,
+                bbox=(x0, y0, x1, y1),
+                keypoints=kps,
             ))
         return detections
 
