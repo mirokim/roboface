@@ -222,6 +222,15 @@ def _handle_sensor_event(
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
         asyncio.create_task(_wave_back(ctx, face, servos))
+    elif ev.type == SensorEventType.GESTURE_HANDS_UP:
+        log.info("🙌 hands up 응답 시작")
+        asyncio.create_task(_hands_up_back(ctx, face, servos))
+    elif ev.type == SensorEventType.GESTURE_HEAD_NOD:
+        log.info("👍 head nod 응답 시작")
+        asyncio.create_task(_simple_reply(ctx, face, _HEAD_NOD_REPLIES))
+    elif ev.type == SensorEventType.GESTURE_HEAD_SHAKE:
+        log.info("🙅 head shake 응답 시작")
+        asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES))
 
 
 _WAVE_GREETINGS = (
@@ -232,6 +241,69 @@ _WAVE_GREETINGS = (
     "안녕 안녕!",
     "헤이~",
 )
+
+_HANDS_UP_REPLIES = (
+    "와! 만세!",
+    "야호!",
+    "신난다!",
+    "오, 뭐가 좋은 일 있어?",
+    "축하해!",
+)
+
+_HEAD_NOD_REPLIES = (
+    "응응.",
+    "그래!",
+    "오케이!",
+    "알겠어.",
+    "좋아.",
+)
+
+_HEAD_SHAKE_REPLIES = (
+    "안돼?",
+    "왜?",
+    "음... 알겠어.",
+    "아냐?",
+    "그래, 그러지 말자.",
+)
+
+
+async def _simple_reply(
+    ctx: StateContext, face: FaceState, replies: tuple[str, ...],
+) -> None:
+    """짧은 발화만 — 표정/머리는 그대로. 끄덕임/도리도리 응답용."""
+    if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
+        return
+    msg = random.choice(replies)
+    log.info(f"🗣️  {msg}")
+    asyncio.create_task(fake_speak(face, msg))
+
+
+async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
+    """양손 만세 응답 — STARSTRUCK + 짧은 댄스 + 신난 멘트."""
+    if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
+        return
+    from src.face.expressions import STARSTRUCK
+    face.apply_expression(STARSTRUCK)
+    ctx.transition(State.GREETING, face)
+    msg = random.choice(_HANDS_UP_REPLIES)
+    log.info(f"🗣️  {msg}")
+    speech_task = asyncio.create_task(fake_speak(face, msg))
+    await asyncio.sleep(0)
+    try:
+        if servos is not None:
+            await poses.dance(servos, face, bpm=150, beats=4)
+        else:
+            await asyncio.sleep(1.5)
+        try:
+            await speech_task
+        except Exception as e:
+            log.debug(f"hands_up 멘트 에러: {e}")
+    finally:
+        if not speech_task.done():
+            speech_task.cancel()
+        ctx.transition(
+            State.WATCHING if ctx.user_present else State.IDLE, face,
+        )
 
 
 async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:

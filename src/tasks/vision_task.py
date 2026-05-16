@@ -17,6 +17,9 @@ from src.utils.logger import get_logger
 from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
+from src.vision.pose_gestures import (
+    HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+)
 from src.vision.wave_detector import WaveDetector
 from src.vision.wrist_wave_detector import WristWaveDetector
 
@@ -45,11 +48,18 @@ async def run_vision(
     detector = PersonDetector(
         min_confidence=0.1 if VISION_MODE == "pose" else 0.5,
     )
+    fps = getattr(cam, "target_fps", 5.0)
     wave_detector: WaveDetector | WristWaveDetector
+    hands_up_detector: HandsUpDetector | None = None
+    head_nod_detector: HeadNodDetector | None = None
+    head_shake_detector: HeadShakeDetector | None = None
     if VISION_MODE == "pose":
-        wave_detector = WristWaveDetector(fps=getattr(cam, "target_fps", 5.0))
+        wave_detector = WristWaveDetector(fps=fps)
+        hands_up_detector = HandsUpDetector(fps=fps)
+        head_nod_detector = HeadNodDetector(fps=fps)
+        head_shake_detector = HeadShakeDetector(fps=fps)
     else:
-        wave_detector = WaveDetector(fps=getattr(cam, "target_fps", 5.0))
+        wave_detector = WaveDetector(fps=fps)
     emotion_mirror = EmotionMirror() if face is not None else None
     face_memory = FaceMemory(DATA_DIR / "faces.db") if ctx is not None else None
     last_recognized: str | None = None
@@ -78,12 +88,12 @@ async def run_vision(
                     d for d in detections
                     if d.class_name == "person" and d.confidence >= person_filter_conf
                 ]
-                # 5초마다 진단 로그
+                # 5초마다 진단 로그 (DEBUG)
                 now_dt = time.time()
                 if now_dt - last_diag_log_at > 5.0:
                     last_diag_log_at = now_dt
                     has_kp = any(d.keypoints is not None for d in person_dets)
-                    log.info(
+                    log.debug(
                         f"vision: raw={len(detections)} "
                         f"person_dets={len(person_dets)} (필터≥{person_filter_conf}) "
                         f"keypoints={'있음' if has_kp else '없음'}"
@@ -165,6 +175,25 @@ async def run_vision(
                             type=SensorEventType.GESTURE_WAVE,
                             data={"bbox": effective_bbox},
                         ))
+                    # pose 모드: 추가 제스처들
+                    if (person_confirmed_this_frame and last_keypoints is not None
+                            and hands_up_detector is not None):
+                        if hands_up_detector.process(last_keypoints):
+                            emit_event(SensorEvent(
+                                type=SensorEventType.GESTURE_HANDS_UP, data={},
+                            ))
+                        if head_nod_detector is not None and head_nod_detector.process(
+                            last_keypoints,
+                        ):
+                            emit_event(SensorEvent(
+                                type=SensorEventType.GESTURE_HEAD_NOD, data={},
+                            ))
+                        if head_shake_detector is not None and head_shake_detector.process(
+                            last_keypoints,
+                        ):
+                            emit_event(SensorEvent(
+                                type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
+                            ))
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)
                         if emotion == EMOTION_SMILE:

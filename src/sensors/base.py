@@ -18,6 +18,9 @@ class SensorEventType(Enum):
     ENV_HUMIDITY = "env_humidity"          # 습도 측정
     ENV_ALERT = "env_alert"                # 환경 급변
     GESTURE_WAVE = "gesture_wave"          # 손 흔들기 감지
+    GESTURE_HANDS_UP = "gesture_hands_up"  # 양손 만세
+    GESTURE_HEAD_NOD = "gesture_head_nod"  # 고개 끄덕임 (yes)
+    GESTURE_HEAD_SHAKE = "gesture_head_shake"  # 고개 도리도리 (no)
 
 
 @dataclass

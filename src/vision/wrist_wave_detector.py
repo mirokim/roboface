@@ -101,14 +101,14 @@ class WristWaveDetector:
             and r_shoulder[2] >= self.KP_CONF_THRESHOLD
         )
 
-        # 진단 — 2초마다 keypoint conf + y 좌표 + history 출력
+        # 진단 — 2초마다 keypoint conf + y 좌표 + history (DEBUG)
         now_t = time.time()
         if now_t - self._last_debug_log_at > 2.0:
             self._last_debug_log_at = now_t
             sh_y_show = (
                 (l_shoulder[1] + r_shoulder[1]) / 2 if shoulder_ok else -1
             )
-            log.info(
+            log.debug(
                 f"wave kp: shoulder L={l_shoulder[2]:.2f} R={r_shoulder[2]:.2f} "
                 f"(y={sh_y_show:.2f}) | "
                 f"wrist L={l_wrist[2]:.2f}(y={l_wrist[1]:.2f}) "

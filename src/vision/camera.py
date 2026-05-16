@@ -243,7 +243,7 @@ class IMX500Camera:
             now = time.time()
             if now - self._pose_diag_last > 5.0:
                 self._pose_diag_last = now
-                log.info(f"pose 진단: raw=0 (감지된 사람 없음)")
+                log.debug("pose 진단: raw=0 (감지된 사람 없음)")
             return []
 
         try:
@@ -251,19 +251,20 @@ class IMX500Camera:
             kp_arr = np.reshape(
                 np.stack(keypoints, axis=0), (len(scores), 17, 3),
             ).astype(np.float32)
-            kp_arr[:, :, 0] /= float(self.POSE_IMG_W)   # x ÷ 640
-            kp_arr[:, :, 1] /= float(self.POSE_IMG_H)   # y ÷ 480
+            kp_arr[:, :, 0] /= float(self.POSE_IMG_W)
+            kp_arr[:, :, 1] /= float(self.POSE_IMG_H)
         except Exception as e:
             log.debug(f"pose reshape 실패: {e}")
             return []
 
-        # 5초마다 현재 score 분포 진단
+        # 5초마다 score 분포 (DEBUG)
         now = time.time()
         if now - self._pose_diag_last > 5.0:
             self._pose_diag_last = now
             score_list = [float(s) for s in scores]
-            log.info(
-                f"pose 진단: raw={len(scores)} scores={[f'{s:.2f}' for s in score_list[:5]]} "
+            log.debug(
+                f"pose 진단: raw={len(scores)} "
+                f"scores={[f'{s:.2f}' for s in score_list[:5]]} "
                 f"threshold={self.threshold}"
             )
 
