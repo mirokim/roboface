@@ -212,22 +212,42 @@ def _handle_sensor_event(
         asyncio.create_task(_wave_back(ctx, face, servos))
 
 
+_WAVE_GREETINGS = (
+    "안녕?",
+    "어, 안녕!",
+    "반가워!",
+    "오, 손 흔들어줬네!",
+    "안녕 안녕!",
+    "헤이~",
+)
+
+
 async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
-    """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스로 답례."""
+    """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스 + 인사 멘트."""
     # 이미 다른 인터랙션 중이면 양보
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
-    prev_state = ctx.state
+    from src.audio.fake_tts import speak as fake_speak
     from src.face.expressions import HAPPY
+    import random as _random
     face.apply_expression(HAPPY)
     ctx.transition(State.GREETING, face)
+    greeting = _random.choice(_WAVE_GREETINGS)
+    speech_task = asyncio.create_task(fake_speak(face, greeting))
     try:
         if servos is not None:
             from src.motion import poses
             await poses.dance(servos, face, bpm=140, beats=4)
         else:
             await asyncio.sleep(1.5)
+        # 멘트가 모션보다 길면 끝까지 기다림
+        try:
+            await speech_task
+        except Exception as e:
+            log.debug(f"wave 멘트 에러: {e}")
     finally:
+        if not speech_task.done():
+            speech_task.cancel()
         # 사용자 보이면 watching, 아니면 idle
         ctx.transition(
             State.WATCHING if ctx.user_present else State.IDLE,
