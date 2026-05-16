@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import random
 
+from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import BEHAVIOR
 from src.face.renderer import FaceState
@@ -18,14 +19,24 @@ from src.utils.logger import get_logger
 log = get_logger("idle_anim")
 
 
-async def run_idle_gaze(face: FaceState) -> None:
-    """무한루프: 가끔 시선 살짝 움직임."""
+async def run_idle_gaze(
+    face: FaceState,
+    perception: PerceptionState | None = None,
+) -> None:
+    """무한루프: 가끔 시선 살짝 움직임.
+
+    perception이 주어지고 사람이 보이면 skip — eye_tracker에 양보.
+    """
     while True:
         wait = random.uniform(
             BEHAVIOR.idle_look_min_interval_sec,
             BEHAVIOR.idle_look_max_interval_sec,
         )
         await asyncio.sleep(wait)
+
+        # 사람이 보이면 idle 두리번은 양보 — eye_tracker가 사용자 방향으로 lock
+        if perception is not None and perception.person_present:
+            continue
 
         # 무작위 방향으로 살짝 응시 (-0.6 ~ +0.6)
         dx = random.uniform(-0.6, 0.6)
