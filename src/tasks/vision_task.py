@@ -106,16 +106,42 @@ async def run_vision(
                     d for d in detections
                     if d.class_name == "person" and d.confidence >= person_filter_conf
                 ]
-                # 5초마다 진단 로그 (DEBUG)
+                # 5초마다 진단 로그 — 제스처 인식 안 될 때 어디서 막혔는지 즉시 파악.
                 now_dt = time.time()
                 if now_dt - last_diag_log_at > 5.0:
                     last_diag_log_at = now_dt
                     has_kp = any(d.keypoints is not None for d in person_dets)
-                    log.debug(
-                        f"vision: raw={len(detections)} "
-                        f"person_dets={len(person_dets)} (필터≥{person_filter_conf}) "
-                        f"keypoints={'있음' if has_kp else '없음'}"
-                    )
+                    parts = [
+                        f"raw={len(detections)}",
+                        f"person={len(person_dets)}(≥{person_filter_conf})",
+                        f"kp={'O' if has_kp else 'X'}",
+                        f"orient={last_orientation}",
+                    ]
+                    if pose_stab is not None:
+                        avg_score = (
+                            sum(pose_stab._score_history) / len(pose_stab._score_history)
+                            if pose_stab._score_history else 0.0
+                        )
+                        parts.append(
+                            f"lock={'O' if pose_stab.is_locked else 'X'}"
+                            f"(score~{avg_score:.3f}/{pose_stab.lock_min_score})"
+                        )
+                    if hands_up_detector is not None:
+                        d = hands_up_detector.diag()
+                        parts.append(f"hands_up={d['consecutive']}/{d['need']}")
+                    if head_nod_detector is not None:
+                        d = head_nod_detector.diag()
+                        parts.append(f"nod={d['history']}/{d['need']}")
+                    if head_shake_detector is not None:
+                        d = head_shake_detector.diag()
+                        parts.append(f"shake={d['history']}/{d['need']}")
+                    if gaze_detector is not None:
+                        d = gaze_detector.diag()
+                        parts.append(
+                            f"gaze={d['history']}/{d['need']}"
+                            f"(f={d['facing_ratio']:.2f})"
+                        )
+                    log.info("vision diag: " + " ".join(parts))
                 if person_dets:
                     biggest = max(
                         person_dets,

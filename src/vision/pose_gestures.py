@@ -102,6 +102,15 @@ class HandsUpDetector:
     def reset(self) -> None:
         self._consecutive = 0
 
+    def diag(self) -> dict:
+        return {
+            "consecutive": self._consecutive,
+            "need": self.required_frames,
+            "cooldown_remain": max(
+                0.0, self.cooldown_sec - (time.time() - self._last_at),
+            ),
+        }
+
     def process(self, keypoints: Any) -> bool:
         if keypoints is None:
             self._consecutive = 0
@@ -169,6 +178,15 @@ class _HeadOscillationDetector:
     def reset(self) -> None:
         self.history.clear()
         self._shoulder_widths.clear()
+
+    def diag(self) -> dict:
+        return {
+            "history": len(self.history),
+            "need": self.history_max,
+            "cooldown_remain": max(
+                0.0, self.cooldown_sec - (time.time() - self._last_at),
+            ),
+        }
 
     def process(self, keypoints: Any) -> bool:
         if keypoints is None:
@@ -291,6 +309,17 @@ class GazeAtMeDetector:
 
     def reset(self) -> None:
         self.recent.clear()
+
+    def diag(self) -> dict:
+        seq = list(self.recent)
+        return {
+            "history": len(seq),
+            "need": self.recent.maxlen,
+            "facing_ratio": (sum(seq) / len(seq)) if seq else 0.0,
+            "cooldown_remain": max(
+                0.0, self.cooldown_sec - (time.time() - self._last_at),
+            ),
+        }
 
     def _is_facing(self, keypoints: Any) -> bool:
         nose = keypoints[KP_NOSE]

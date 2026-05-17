@@ -133,9 +133,13 @@ async def run_robot() -> None:
             run_voice_assistant(ctx, face, servos=servos, mic=shared_mic),
             name="voice_assistant",
         ),
-        # 외부 명령 큐 — scripts/robot_cli.py에서 INSERT한 명령 처리
+        # 외부 명령 큐 — scripts/robot_cli.py에서 INSERT한 명령 처리.
+        # gesture 명령은 sensors.events에 그대로 emit해 vision 우회 가능.
         asyncio.create_task(
-            command_executor.run(face, ctx, servos=servos),
+            command_executor.run(
+                face, ctx, servos=servos,
+                emit_event=lambda ev: sensors.events.append(ev),
+            ),
             name="command_executor",
         ),
     ]

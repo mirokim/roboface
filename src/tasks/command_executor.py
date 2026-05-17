@@ -21,6 +21,8 @@ import asyncio
 import json
 import time
 
+from collections.abc import Callable
+
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import memory
 from src.brain.state_machine import State, StateContext
@@ -30,6 +32,7 @@ from src.face.eyes import trigger_blink
 from src.face.renderer import FaceState
 from src.motion import poses
 from src.motion.servos import ServoController
+from src.sensors.base import SensorEvent, SensorEventType
 from src.utils.logger import get_logger
 
 log = get_logger("command_executor")
@@ -44,12 +47,26 @@ _POSE_MAP = {
 }
 
 
+# CLI `gesture <kind>` → SensorEventType 매핑.
+# vision 없이도 downstream(메모리/표정/멘트)이 잘 도는지 검증 가능.
+_GESTURE_MAP = {
+    "wave": SensorEventType.GESTURE_WAVE,
+    "hands_up": SensorEventType.GESTURE_HANDS_UP,
+    "nod": SensorEventType.GESTURE_HEAD_NOD,
+    "shake": SensorEventType.GESTURE_HEAD_SHAKE,
+    "gaze": SensorEventType.GAZE_AT_ME,
+    "presence_new": SensorEventType.PRESENCE_NEW,
+    "presence_left": SensorEventType.PRESENCE_LEFT,
+}
+
+
 async def _execute(
     cmd: str,
     args: dict,
     face: FaceState,
     ctx: StateContext,
     servos: ServoController | None,
+    emit_event: Callable[[SensorEvent], None] | None = None,
 ) -> str:
     """단일 명령 실행. 성공 시 result 문자열 반환, 실패 시 raise."""
     if cmd == "speak":
@@ -118,6 +135,18 @@ async def _execute(
             "brightness": face.brightness,
         }, ensure_ascii=False)
 
+    if cmd == "gesture":
+        kind = args.get("kind", "")
+        ev_type = _GESTURE_MAP.get(kind)
+        if ev_type is None:
+            raise ValueError(
+                f"알 수 없는 gesture: {kind}. 가능: {list(_GESTURE_MAP)}",
+            )
+        if emit_event is None:
+            raise RuntimeError("emit_event 콜백 미주입 (main에서 등록 필요)")
+        emit_event(SensorEvent(type=ev_type, data={"source": "cli"}))
+        return f"gesture: {kind} → {ev_type.value}"
+
     raise ValueError(f"알 수 없는 명령: {cmd}")
 
 
@@ -126,8 +155,12 @@ async def run(
     ctx: StateContext,
     servos: ServoController | None = None,
     poll_interval_sec: float | None = None,
+    emit_event: Callable[[SensorEvent], None] | None = None,
 ) -> None:
-    """1초마다 pending 명령 처리."""
+    """주기적으로 pending 명령 처리.
+
+    emit_event: gesture 명령에서 SensorEvent를 SensorManager.events 등으로 보낼 콜백.
+    """
     if poll_interval_sec is None:
         poll_interval_sec = BEHAVIOR.proactive_eval_interval_sec  # 1s 기본 재사용
     log.info(f"command_executor 시작 (poll={poll_interval_sec}s)")
@@ -141,7 +174,10 @@ async def run(
         for c in pending:
             cmd_id = c["id"]
             try:
-                result = await _execute(c["cmd"], c["args"], face, ctx, servos)
+                result = await _execute(
+                    c["cmd"], c["args"], face, ctx, servos,
+                    emit_event=emit_event,
+                )
                 memory.mark_command_done(cmd_id, result)
                 log.info(f"명령 #{cmd_id} 완료: {c['cmd']} → {result[:60]}")
             except Exception as e:

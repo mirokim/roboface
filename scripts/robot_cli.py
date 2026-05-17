@@ -84,6 +84,16 @@ def main() -> int:
     st = sub.add_parser("transition", help="상태 머신 강제 전이")
     st.add_argument("state", choices=[s.name for s in State])
 
+    sg = sub.add_parser(
+        "gesture",
+        help="vision 우회해 sensor event 강제 emit (제스처 인식 downstream 검증)",
+    )
+    sg.add_argument(
+        "kind",
+        choices=["wave", "hands_up", "nod", "shake", "gaze",
+                 "presence_new", "presence_left"],
+    )
+
     sub.add_parser("blink", help="즉시 깜빡임")
     sub.add_parser("status", help="현재 상태 조회 (--wait 자동)")
     sub.add_parser("expressions", help="사용 가능한 표정 이름 목록")
@@ -111,6 +121,8 @@ def main() -> int:
         return _enqueue_and_report("pose", {"kind": args.kind}, wait)
     if args.cmd == "transition":
         return _enqueue_and_report("transition", {"state": args.state}, wait)
+    if args.cmd == "gesture":
+        return _enqueue_and_report("gesture", {"kind": args.kind}, wait)
     if args.cmd == "blink":
         return _enqueue_and_report("blink", {}, wait)
     if args.cmd == "status":

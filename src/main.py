@@ -104,7 +104,10 @@ async def run_simulator() -> None:
             name="proactive",
         ),
         asyncio.create_task(
-            command_executor.run(face, ctx, servos=servos),
+            command_executor.run(
+                face, ctx, servos=servos,
+                emit_event=lambda ev: sensors.events.append(ev),
+            ),
             name="command_executor",
         ),
     ]
