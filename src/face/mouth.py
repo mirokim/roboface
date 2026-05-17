@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pygame
 
-from src.config import COLOR_BG, COLOR_MOUTH, LINE_THICK
+from src.config import BEHAVIOR, COLOR_BG, COLOR_MOUTH, LINE_THICK
 from src.face.expressions import MouthShape
 from src.face.eyes import clean_arc
 
@@ -18,16 +18,22 @@ class MouthState:
     talk_amplitude: float = 0.0
 
 
+def shape_for_amp(amp: float) -> MouthShape:
+    """정규화된 입 모양 진폭(0~1) → MouthShape. mouth.py와 tts.py 공유 SSOT."""
+    small, mid, large = BEHAVIOR.mouth_amp_thresholds
+    if amp < small:
+        return MouthShape.NEUTRAL
+    if amp < mid:
+        return MouthShape.OPEN_SMALL
+    if amp < large:
+        return MouthShape.OPEN_MID
+    return MouthShape.OPEN_LARGE
+
+
 def update_talking(state: MouthState, audio_rms: float, now: float) -> None:
-    state.talk_amplitude = min(1.0, audio_rms * 3.0)
-    if audio_rms < 0.05:
-        state.shape = MouthShape.NEUTRAL
-    elif audio_rms < 0.15:
-        state.shape = MouthShape.OPEN_SMALL
-    elif audio_rms < 0.3:
-        state.shape = MouthShape.OPEN_MID
-    else:
-        state.shape = MouthShape.OPEN_LARGE
+    """raw RMS(0~0.3대) → 0~1 정규화 후 shape 결정."""
+    state.talk_amplitude = min(1.0, audio_rms * BEHAVIOR.mouth_raw_rms_gain)
+    state.shape = shape_for_amp(state.talk_amplitude)
 
 
 def draw_mouth(

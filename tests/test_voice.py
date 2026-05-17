@@ -9,19 +9,20 @@ import pytest
 
 from src.audio.tts import (
     _compute_rms_envelope,
-    _shape_for_amp,
     _fake_speak,
 )
 from src.face.expressions import MouthShape, NEUTRAL
+from src.face.mouth import shape_for_amp
 from src.face.renderer import FaceState
 
 
 def test_shape_for_amp_thresholds():
-    assert _shape_for_amp(0.0) == MouthShape.NEUTRAL
-    assert _shape_for_amp(0.1) == MouthShape.NEUTRAL
-    assert _shape_for_amp(0.2) == MouthShape.OPEN_SMALL
-    assert _shape_for_amp(0.5) == MouthShape.OPEN_MID
-    assert _shape_for_amp(0.9) == MouthShape.OPEN_LARGE
+    # BehaviorConfig.mouth_amp_thresholds = (0.15, 0.35, 0.65)
+    assert shape_for_amp(0.0) == MouthShape.NEUTRAL
+    assert shape_for_amp(0.1) == MouthShape.NEUTRAL
+    assert shape_for_amp(0.2) == MouthShape.OPEN_SMALL
+    assert shape_for_amp(0.5) == MouthShape.OPEN_MID
+    assert shape_for_amp(0.9) == MouthShape.OPEN_LARGE
 
 
 def test_rms_envelope_silence():

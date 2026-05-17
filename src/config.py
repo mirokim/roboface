@@ -149,6 +149,32 @@ class BehaviorConfig:
     idle_screen_dim_after_sec: int = 300    # 5분 부재
     idle_screen_off_after_sec: int = 1800   # 30분 부재
 
+    # 에이전트 결정 주기
+    agent_interval_sec: float = 15.0        # Claude 결정 주기
+    agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
+
+    # 인사
+    greeting_cooldown_sec: float = 300.0    # 같은 사람에게 5분 안엔 다시 인사 X
+
+    # 대화 기록
+    history_recent_window_min: float = 15.0   # 에이전트가 보는 직전 대화 윈도우
+    history_recent_turns: int = 6             # 에이전트가 보는 직전 턴 수
+    history_voice_turns: int = 6              # voice_assistant 컨텍스트 턴 수
+
+    # 발화 표시
+    min_speech_display_sec: float = 3.0       # 말풍선 최소 노출
+
+    # 입 모양 → 음량 (단일 SSOT — mouth.py + tts.py 공통)
+    # 정규화된 0~1 진폭 기준. (small, mid, large) 임계값 이상이면 다음 단계.
+    mouth_amp_thresholds: tuple[float, float, float] = (0.15, 0.35, 0.65)
+    # raw RMS(마이크 입력) → 0~1 정규화 게인 (mouth.update_talking 전용)
+    mouth_raw_rms_gain: float = 3.0
+
+    # 폴링 주기
+    proactive_eval_interval_sec: float = 1.0   # proactive_speaker.run_loop
+    work_tracker_interval_sec: float = 60.0    # work_tracker.run
+    sensor_poll_interval_sec: float = 0.1      # SensorManager.run
+
 
 BEHAVIOR = BehaviorConfig()
 

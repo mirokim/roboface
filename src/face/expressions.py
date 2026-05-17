@@ -75,6 +75,10 @@ YAWN = Expression("yawn", EyeShape.SLEEPY, MouthShape.O)                  # 하�
 CURIOUS = Expression("curious", EyeShape.NORMAL, MouthShape.O)            # 호기심
 WINK_R = Expression("wink_r", EyeShape.WINK_RIGHT, MouthShape.SMILE)      # 반대쪽 윙크
 
+# === 추가 2종 (혼란/짜증) ===
+CONFUSED = Expression("confused", EyeShape.WORRIED, MouthShape.WAVY)      # 혼란/의문
+ANNOYED = Expression("annoyed", EyeShape.SQUINT, MouthShape.FLAT)         # 살짝 짜증
+
 
 EXPRESSIONS_BY_NAME: dict[str, Expression] = {
     e.name: e
@@ -82,6 +86,7 @@ EXPRESSIONS_BY_NAME: dict[str, Expression] = {
         NEUTRAL, HAPPY, EXCITED, SLEEPY, SURPRISED, WORRIED, SAD,
         FOCUSED, LOVE, THINKING, WINK, ANGRY,
         CONTENT, PROUD, SHOCKED, DIZZY, STARSTRUCK, YAWN, CURIOUS, WINK_R,
+        CONFUSED, ANNOYED,
     ]
 }
 

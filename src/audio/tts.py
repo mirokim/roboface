@@ -17,6 +17,7 @@ import os
 import random
 
 from src.face.expressions import MouthShape
+from src.face.mouth import shape_for_amp
 from src.face.renderer import FaceState
 from src.utils.logger import get_logger
 
@@ -25,17 +26,6 @@ log = get_logger("tts")
 
 class TTSError(RuntimeError):
     pass
-
-
-def _shape_for_amp(amp: float) -> MouthShape:
-    # MouthShape에 CLOSED 가 없으므로 NEUTRAL (가벼운 호)를 닫힌 입으로 사용.
-    if amp < 0.15:
-        return MouthShape.NEUTRAL
-    if amp < 0.35:
-        return MouthShape.OPEN_SMALL
-    if amp < 0.65:
-        return MouthShape.OPEN_MID
-    return MouthShape.OPEN_LARGE
 
 
 class OpenAITTS:
@@ -172,7 +162,7 @@ async def speak(
             now = asyncio.get_event_loop().time() - start
             if t > now:
                 await asyncio.sleep(t - now)
-            face.mouth_state.shape = _shape_for_amp(amp)
+            face.mouth_state.shape = shape_for_amp(amp)
             face.mouth_state.talk_amplitude = amp
         # 잔여 시간
         elapsed = asyncio.get_event_loop().time() - start

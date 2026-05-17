@@ -43,7 +43,7 @@ from src.integrations.thinktank.poc import run_poc as thinktank_poc
 from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
-from src.tasks import journal_writer, schedule_extractor
+from src.tasks import command_executor, journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
 from src.tasks.idle_animation import run_idle_gaze
 from src.tasks.posture_monitor import PostureMonitor
@@ -87,6 +87,8 @@ async def run_simulator() -> None:
     ambient.add_handler(schedule_extractor.handle_transcript)
     ambient.add_handler(journal_writer.handle_transcript)
 
+    servos = create_servos()  # mock 서보 (실제 모드면 PCA9685)
+
     # 백그라운드 태스크들
     bg_tasks = [
         asyncio.create_task(sensors.run(), name="sensors"),
@@ -101,9 +103,11 @@ async def run_simulator() -> None:
             run_proactive(ctx, face, lambda: work_tracker.current_session_id),
             name="proactive",
         ),
+        asyncio.create_task(
+            command_executor.run(face, ctx, servos=servos),
+            name="command_executor",
+        ),
     ]
-
-    _ = create_servos()  # mock 서보 (실제 모드면 PCA9685)
 
     try:
         running = True

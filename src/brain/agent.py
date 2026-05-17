@@ -23,24 +23,20 @@ from datetime import datetime
 from src.brain import conversation, memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
+from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
-from src.config import ANTHROPIC_API_KEY
+from src.config import ANTHROPIC_API_KEY, BEHAVIOR
 from src.face import expressions as expr
+from src.face.expressions import EXPRESSIONS_BY_NAME
 from src.face.renderer import FaceState
 from src.utils.logger import get_logger
 
 log = get_logger("agent")
 
 
-AGENT_INTERVAL_SEC = 15.0   # 결정 주기
-SPEAK_MIN_GAP_SEC = 90.0    # 에이전트 발화 사이 최소 간격 (잔소리 방지)
-
-
-_EXPRESSION_NAMES = (
-    "NEUTRAL", "HAPPY", "EXCITED", "SAD", "SURPRISED", "SLEEPY", "WORRIED",
-    "FOCUSED", "LOVE", "THINKING", "WINK", "CONTENT", "PROUD", "DIZZY",
-    "STARSTRUCK", "YAWN", "CURIOUS",
-)
+# 표정 enum은 expressions.py SSOT에서 자동 도출.
+# tool 스키마는 대문자 이름 받아 expr.get(name.lower())로 매핑.
+_EXPRESSION_NAMES = tuple(sorted(n.upper() for n in EXPRESSIONS_BY_NAME))
 
 _TOOLS = [
     {
@@ -118,7 +114,14 @@ _AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Robof
 """
 
 
-def _gather_recent_messages(minutes: float = 15.0, limit: int = 6) -> str:
+def _gather_recent_messages(
+    minutes: float | None = None,
+    limit: int | None = None,
+) -> str:
+    if minutes is None:
+        minutes = BEHAVIOR.history_recent_window_min
+    if limit is None:
+        limit = BEHAVIOR.history_recent_turns
     try:
         rows = memory.recent_conversation(minutes=minutes, limit=limit)
     except Exception:
@@ -138,17 +141,7 @@ def _build_situation(
     work_minutes: float | None,
 ) -> str:
     now = datetime.now()
-    hour = now.hour
-    if 5 <= hour < 11:
-        period = "아침"
-    elif 11 <= hour < 14:
-        period = "점심"
-    elif 14 <= hour < 18:
-        period = "오후"
-    elif 18 <= hour < 22:
-        period = "저녁"
-    else:
-        period = "심야"
+    period = period_ko(now)
 
     temp = (perception.temperature_c
             if perception and perception.temperature_c is not None else None)
@@ -221,7 +214,9 @@ class RobotAgent:
             return True
         return False
 
-    async def run(self, interval_sec: float = AGENT_INTERVAL_SEC) -> None:
+    async def run(self, interval_sec: float | None = None) -> None:
+        if interval_sec is None:
+            interval_sec = BEHAVIOR.agent_interval_sec
         if not ANTHROPIC_API_KEY:
             log.info("agent 비활성 — ANTHROPIC_API_KEY 없음")
             return
@@ -276,14 +271,14 @@ class RobotAgent:
         if not text:
             return
         now = time.time()
-        if now - self._last_speak_at < SPEAK_MIN_GAP_SEC:
+        if now - self._last_speak_at < BEHAVIOR.agent_speak_min_gap_sec:
             log.debug("agent: speak skip (gap 부족)")
             return
         self._last_speak_at = now
-        # 표정 함께 지정됐으면 적용
+        # 표정 함께 지정됐으면 적용 (대문자/소문자 모두 허용)
         expr_name = inp.get("expression")
         if expr_name:
-            ex = getattr(expr, expr_name, None)
+            ex = expr.EXPRESSIONS_BY_NAME.get(expr_name.lower())
             if ex is not None:
                 self.face.apply_expression(ex)
         log.info(f"🤖 [agent] {text}")
@@ -300,7 +295,7 @@ class RobotAgent:
         expr_name = inp.get("expression")
         if not expr_name:
             return
-        ex = getattr(expr, expr_name, None)
+        ex = expr.EXPRESSIONS_BY_NAME.get(expr_name.lower())
         if ex is None:
             return
         log.info(f"🤖 [agent] 표정 → {expr_name}")

@@ -9,14 +9,13 @@ pygame 없음. LCD 렌더러는 추후 통합. 지금은 백그라운드 task만
 from __future__ import annotations
 
 import asyncio
-import random
 import signal
 import sys
 import time
 
 from src.audio.fake_tts import speak as fake_speak
 from src.audio.mic import Microphone, MicCaptureError
-from src.brain import memory
+from src.brain import conversation_templates, memory
 from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
@@ -28,7 +27,7 @@ from src.motion import poses
 from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
-from src.tasks import behavior_speaker, journal_writer, schedule_extractor
+from src.tasks import behavior_speaker, command_executor, journal_writer, schedule_extractor
 from src.tasks.ambient_listener import AmbientListener
 from src.tasks.audio_reactive import run_audio_reactive
 from src.tasks.eye_tracker import run_eye_tracker
@@ -133,6 +132,11 @@ async def run_robot() -> None:
         asyncio.create_task(
             run_voice_assistant(ctx, face, servos=servos, mic=shared_mic),
             name="voice_assistant",
+        ),
+        # 외부 명령 큐 — scripts/robot_cli.py에서 INSERT한 명령 처리
+        asyncio.create_task(
+            command_executor.run(face, ctx, servos=servos),
+            name="command_executor",
         ),
     ]
     if shared_mic is not None:
@@ -247,72 +251,30 @@ def _handle_sensor_event(
     elif ev.type == SensorEventType.GESTURE_HEAD_NOD:
         log.info("👍 head nod 응답 시작")
         memory.log_user("(끄덕임 — yes)", kind="gesture_nod")
-        asyncio.create_task(_simple_reply(ctx, face, _HEAD_NOD_REPLIES, "nod"))
+        asyncio.create_task(_simple_reply(ctx, face, "nod"))
     elif ev.type == SensorEventType.GESTURE_HEAD_SHAKE:
         log.info("🙅 head shake 응답 시작")
         memory.log_user("(도리도리 — no)", kind="gesture_shake")
-        asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES, "shake"))
+        asyncio.create_task(_simple_reply(ctx, face, "shake"))
     elif ev.type == SensorEventType.GAZE_AT_ME:
         log.info("👀 정면 응시 응답 시작")
         memory.log_user("(사용자가 나를 쳐다봄)", kind="gaze_at_me")
-        asyncio.create_task(_simple_reply(ctx, face, _GAZE_REPLIES, "gaze"))
-
-
-_WAVE_GREETINGS = (
-    "안녕?",
-    "어, 안녕!",
-    "반가워!",
-    "오, 손 흔들어줬네!",
-    "안녕 안녕!",
-    "헤이~",
-)
-
-_HANDS_UP_REPLIES = (
-    "와! 만세!",
-    "야호!",
-    "신난다!",
-    "오, 뭐가 좋은 일 있어?",
-    "축하해!",
-)
-
-_HEAD_NOD_REPLIES = (
-    "응응.",
-    "그래!",
-    "오케이!",
-    "알겠어.",
-    "좋아.",
-)
-
-_HEAD_SHAKE_REPLIES = (
-    "안돼?",
-    "왜?",
-    "음... 알겠어.",
-    "아냐?",
-    "그래, 그러지 말자.",
-)
-
-_GAZE_REPLIES = (
-    "왜?",
-    "응? 무슨 일?",
-    "왜 그래?",
-    "나 부른 거야?",
-    "응, 봐.",
-    "뭐 해줄까?",
-    "음, 부르려고?",
-)
+        asyncio.create_task(_simple_reply(ctx, face, "gaze"))
 
 
 async def _simple_reply(
-    ctx: StateContext, face: FaceState, replies: tuple[str, ...],
-    kind: str = "gesture_reply",
+    ctx: StateContext, face: FaceState, gesture_kind: str,
 ) -> None:
-    """짧은 발화만 — 표정/머리는 그대로. 끄덕임/도리도리 응답용."""
+    """짧은 발화만 — 표정/머리는 그대로. 끄덕임/도리도리 응답용.
+
+    gesture_kind: conversation_templates.GESTURE_POOLS 의 키.
+    """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
-    msg = random.choice(replies)
+    msg = conversation_templates.pick(gesture_kind)
     log.info(f"🗣️  {msg}")
     asyncio.create_task(fake_speak(face, msg))
-    memory.log_robot(msg, kind=kind)
+    memory.log_robot(msg, kind=f"gesture_{gesture_kind}")
 
 
 async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
@@ -322,7 +284,7 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     from src.face.expressions import STARSTRUCK
     face.apply_expression(STARSTRUCK)
     ctx.transition(State.GREETING, face)
-    msg = random.choice(_HANDS_UP_REPLIES)
+    msg = conversation_templates.pick("hands_up")
     log.info(f"🗣️  {msg}")
     ctx.last_greeting_at = time.time()
     memory.log_robot(msg, kind="hands_up_reply")

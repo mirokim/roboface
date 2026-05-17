@@ -13,25 +13,14 @@ from src.audio.fake_tts import speak as fake_speak
 from src.brain import conversation, memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
-from src.brain.triggers import ProactiveTrigger, evaluate_all
-from src.face.expressions import HAPPY, NEUTRAL, WORRIED
+from src.brain.triggers import ProactiveTrigger, evaluate_all, expression_for
+from src.config import BEHAVIOR
 from src.face.renderer import FaceState
 from src.motion import poses
 from src.motion.servos import ServoController
 from src.utils.logger import get_logger
 
 log = get_logger("proactive")
-
-# 트리거 종류별 표정 매핑
-_TRIGGER_EXPR = {
-    "greeting": HAPPY,
-    "work_break_gentle": NEUTRAL,
-    "work_break_warn": NEUTRAL,
-    "work_break_strong": WORRIED,
-    "work_break_alarm": WORRIED,
-    "long_silence": NEUTRAL,
-    "chitchat": HAPPY,
-}
 
 
 async def fire_trigger(
@@ -43,9 +32,8 @@ async def fire_trigger(
     """단일 트리거 처리: 표정 변경 + 머리 동작 + LLM 멘트 + 발화."""
     log.info(f"트리거 처리: {trig.kind} (priority={trig.priority})")
 
-    # 표정
-    expr = _TRIGGER_EXPR.get(trig.kind, NEUTRAL)
-    face.apply_expression(expr)
+    # 표정 — 미정의 트리거면 KeyError로 즉시 드러남
+    face.apply_expression(expression_for(trig.kind))
     if trig.kind.startswith("work_break"):
         ctx.transition(State.ALERTING, face)
 
@@ -109,9 +97,9 @@ async def run_loop(
     servos: ServoController | None = None,
     perception: PerceptionState | None = None,
 ) -> None:
-    """1초마다 트리거 평가."""
+    """주기적으로 트리거 평가 (BEHAVIOR.proactive_eval_interval_sec)."""
     while True:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(BEHAVIOR.proactive_eval_interval_sec)
         if ctx.state in (State.TALKING, State.LISTENING):
             continue
         triggers_list = evaluate_all(

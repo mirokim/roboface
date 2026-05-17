@@ -15,10 +15,31 @@ from typing import Optional
 from src.brain import memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
+from src.brain.time_of_day import period_for
 from src.config import BEHAVIOR
+from src.face import expressions as expr
+from src.face.expressions import Expression
 from src.utils.logger import get_logger
 
 log = get_logger("triggers")
+
+
+# 트리거 종류별 표정 매핑 — 트리거 정의의 일부 (SSOT).
+# 새 트리거 추가 시 여기도 추가. proactive_speaker가 import해서 사용.
+TRIGGER_EXPRESSIONS: dict[str, Expression] = {
+    "greeting": expr.HAPPY,
+    "work_break_gentle": expr.NEUTRAL,
+    "work_break_warn": expr.NEUTRAL,
+    "work_break_strong": expr.WORRIED,
+    "work_break_alarm": expr.WORRIED,
+    "long_silence": expr.NEUTRAL,
+    "chitchat": expr.HAPPY,
+}
+
+
+def expression_for(kind: str) -> Expression:
+    """트리거 kind에 맞는 표정. 미정의는 KeyError로 빠뜨림 방지."""
+    return TRIGGER_EXPRESSIONS[kind]
 
 
 @dataclass
@@ -128,9 +149,6 @@ def check_work_break(
     return None
 
 
-GREETING_COOLDOWN_SEC = 300.0   # 같은 사람에게 5분 안엔 다시 인사 안 함
-
-
 def check_greeting(ctx: StateContext) -> Optional[ProactiveTrigger]:
     """방금 등장한 사용자에게 인사. 직전 인사 후 cooldown 동안엔 skip."""
     if ctx.state == State.GREETING:
@@ -138,7 +156,10 @@ def check_greeting(ctx: StateContext) -> Optional[ProactiveTrigger]:
     if not ctx.user_present:
         return None
     # 마지막 인사 (greeting/wave/hands_up/reappear)와 충분한 간격
-    if ctx.last_greeting_at and time.time() - ctx.last_greeting_at < GREETING_COOLDOWN_SEC:
+    if (
+        ctx.last_greeting_at
+        and time.time() - ctx.last_greeting_at < BEHAVIOR.greeting_cooldown_sec
+    ):
         return None
     # 등장 직후 (last_user_seen_at이 매우 최근에 set됨)
     if ctx.last_user_seen_at and time.time() - ctx.last_user_seen_at < 3.0:
@@ -247,17 +268,19 @@ _CHITCHAT_WORK_LONG = (
 )
 
 
+_PERIOD_TO_CHITCHAT_POOL: dict[str, tuple[str, ...]] = {}
+
+
 def _time_of_day_pool(now: datetime) -> tuple[str, ...]:
-    h = now.hour
-    if 6 <= h < 11:
-        return _CHITCHAT_MORNING
-    if 11 <= h < 14:
-        return _CHITCHAT_LUNCH
-    if 14 <= h < 18:
-        return _CHITCHAT_AFTERNOON
-    if 18 <= h < 22:
-        return _CHITCHAT_EVENING
-    return ()  # 그 외 시간대는 generic만
+    """현재 시간대에 맞는 잡담 풀 — time_of_day.period_for() SSOT 사용."""
+    if not _PERIOD_TO_CHITCHAT_POOL:
+        _PERIOD_TO_CHITCHAT_POOL.update({
+            "morning": _CHITCHAT_MORNING,
+            "lunch": _CHITCHAT_LUNCH,
+            "afternoon": _CHITCHAT_AFTERNOON,
+            "evening": _CHITCHAT_EVENING,
+        })
+    return _PERIOD_TO_CHITCHAT_POOL.get(period_for(now), ())
 
 
 def _temp_pool(temp_c: float | None) -> tuple[str, ...]:

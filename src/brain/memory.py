@@ -81,6 +81,19 @@ CREATE TABLE IF NOT EXISTS face_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snap_ts ON face_snapshots(ts DESC);
+
+-- 외부 제어 명령 큐 (scripts/robot_cli.py가 INSERT, command_executor가 처리)
+CREATE TABLE IF NOT EXISTS command_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    enqueued_at REAL NOT NULL,
+    cmd TEXT NOT NULL,             -- 'speak' / 'expression' / 'dance' / 'pose' 등
+    args TEXT,                     -- JSON
+    status TEXT DEFAULT 'pending', -- pending / done / failed
+    processed_at REAL,
+    result TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cmd_status ON command_queue(status, id);
 """
 
 
@@ -88,13 +101,19 @@ _DB_INITIALIZED = False
 
 
 def init_db(path: Path = DB_PATH) -> None:
-    """스키마 생성 (idempotent). 프로세스당 한 번만 로그."""
+    """스키마 생성 (idempotent). 프로세스당 한 번만 로그.
+
+    WAL 모드 + 짧은 busy_timeout — 여러 task가 동시에 쓰는 환경 안전.
+    """
     global _DB_INITIALIZED
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        # 동시성 — WAL은 다중 reader + 단일 writer 무락. PRAGMA는 persistent.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA_SQL)
     if not _DB_INITIALIZED:
-        log.info(f"DB 초기화: {path}")
+        log.info(f"DB 초기화: {path} (WAL)")
         _DB_INITIALIZED = True
 
 
@@ -102,7 +121,8 @@ def init_db(path: Path = DB_PATH) -> None:
 def db() -> Iterator[sqlite3.Connection]:
     if not _DB_INITIALIZED:
         init_db()
-    conn = sqlite3.connect(DB_PATH)
+    # busy_timeout — 락 충돌 시 5초까지 대기
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -390,3 +410,68 @@ def purge_old_snapshots(keep_days: float = 7.0) -> list[str]:
         paths = [r["photo_path"] for r in rows]
         conn.execute("DELETE FROM face_snapshots WHERE ts < ?", (cutoff,))
         return paths
+
+
+# === 외부 제어 명령 큐 ===
+
+def enqueue_command(cmd: str, args: dict | None = None) -> int:
+    """외부 프로세스(robot_cli)가 호출. 메인 프로세스의 command_executor가 처리."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO command_queue(enqueued_at, cmd, args, status) "
+            "VALUES (?, ?, ?, 'pending')",
+            (time.time(), cmd, json.dumps(args or {}, ensure_ascii=False)),
+        )
+        return cur.lastrowid or 0
+
+
+def fetch_pending_commands(limit: int = 16) -> list[dict]:
+    """pending 명령 가져옴 (FIFO)."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, cmd, args FROM command_queue "
+            "WHERE status='pending' ORDER BY id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            args = json.loads(r["args"] or "{}")
+        except Exception:
+            args = {}
+        out.append({"id": r["id"], "cmd": r["cmd"], "args": args})
+    return out
+
+
+def mark_command_done(cmd_id: int, result: str = "ok") -> None:
+    with db() as conn:
+        conn.execute(
+            "UPDATE command_queue SET status='done', processed_at=?, result=? "
+            "WHERE id=?",
+            (time.time(), result, cmd_id),
+        )
+
+
+def mark_command_failed(cmd_id: int, error: str) -> None:
+    with db() as conn:
+        conn.execute(
+            "UPDATE command_queue SET status='failed', processed_at=?, result=? "
+            "WHERE id=?",
+            (time.time(), error[:500], cmd_id),
+        )
+
+
+def get_command_status(cmd_id: int) -> dict | None:
+    with db() as conn:
+        r = conn.execute(
+            "SELECT id, cmd, args, status, processed_at, result "
+            "FROM command_queue WHERE id=?",
+            (cmd_id,),
+        ).fetchone()
+    if r is None:
+        return None
+    return {
+        "id": r["id"], "cmd": r["cmd"], "args": r["args"],
+        "status": r["status"], "processed_at": r["processed_at"],
+        "result": r["result"],
+    }

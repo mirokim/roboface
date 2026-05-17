@@ -14,6 +14,7 @@ from datetime import datetime
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import memory
 from src.brain.state_machine import State, StateContext
+from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
 from src.face.expressions import Expression
 from src.face.renderer import FaceState
@@ -83,16 +84,7 @@ def say(
 # ─── 행동별 멘트 풀 ───
 
 def _now_period() -> str:
-    h = datetime.now().hour
-    if 5 <= h < 11:
-        return "morning"
-    if 11 <= h < 14:
-        return "lunch"
-    if 14 <= h < 18:
-        return "afternoon"
-    if 18 <= h < 22:
-        return "evening"
-    return "late"
+    return period_for()
 
 
 def _name_prefix(ctx: StateContext) -> str:
