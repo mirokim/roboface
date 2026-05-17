@@ -111,10 +111,38 @@ async def run_vision(
                 if now_dt - last_diag_log_at > 5.0:
                     last_diag_log_at = now_dt
                     has_kp = any(d.keypoints is not None for d in person_dets)
+                    # 가장 큰 person bbox + 그 keypoint 최고 conf (모델이 실제로 뽑는지 확인용)
+                    bbox_str = "bbox=-"
+                    best_kp_str = "best_kp=-"
+                    person_score_str = "score=-"
+                    if person_dets:
+                        biggest_d = max(
+                            person_dets,
+                            key=lambda d: (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]),
+                        )
+                        b = biggest_d.bbox
+                        area = (b[2] - b[0]) * (b[3] - b[1])
+                        bbox_str = (
+                            f"bbox=({b[0]:.2f},{b[1]:.2f},{b[2]:.2f},{b[3]:.2f}) "
+                            f"area={area:.2f}"
+                        )
+                        person_score_str = f"score={biggest_d.confidence:.2f}"
+                        if biggest_d.keypoints is not None:
+                            max_kp = float(biggest_d.keypoints[:, 2].max())
+                            n_above_10 = int(
+                                (biggest_d.keypoints[:, 2] >= 0.10).sum(),
+                            )
+                            best_kp_str = (
+                                f"best_kp={max_kp:.2f} "
+                                f"kp≥0.10={n_above_10}/17"
+                            )
                     parts = [
                         f"raw={len(detections)}",
                         f"person={len(person_dets)}(≥{person_filter_conf})",
+                        person_score_str,
+                        bbox_str,
                         f"kp={'O' if has_kp else 'X'}",
+                        best_kp_str,
                         f"orient={last_orientation}",
                     ]
                     if pose_stab is not None:
