@@ -16,6 +16,51 @@ from src.vision.camera import (
     KP_NOSE, KP_R_EAR, KP_R_EYE, KP_R_SHOULDER, KP_R_WRIST,
 )
 
+
+# ─── 얼굴 방향 판정 ───
+
+def face_orientation(keypoints, kp_conf_threshold: float = 0.20) -> str:
+    """keypoints의 좌/우 눈·귀 신뢰도 차이로 얼굴 방향 추정.
+
+    return: "front" / "side_left" / "side_right" / "away" / "unknown"
+    - front: 양쪽 눈/귀 비교적 균형. 정면 응시.
+    - side_left: 사용자 기준 왼쪽 (카메라 기준 오른쪽 눈/귀만 보임)
+    - side_right: 사용자 기준 오른쪽 (왼쪽 눈/귀만 보임)
+    - away: 코/눈 자체 신뢰도 낮음 (뒤돌거나 가려짐)
+    - unknown: keypoints 없거나 어깨도 안 보임
+    """
+    if keypoints is None:
+        return "unknown"
+    nose = keypoints[KP_NOSE]
+    l_eye = keypoints[KP_L_EYE]
+    r_eye = keypoints[KP_R_EYE]
+    l_ear = keypoints[KP_L_EAR]
+    r_ear = keypoints[KP_R_EAR]
+    l_sh = keypoints[KP_L_SHOULDER]
+    r_sh = keypoints[KP_R_SHOULDER]
+    if l_sh[2] < kp_conf_threshold and r_sh[2] < kp_conf_threshold:
+        return "unknown"
+
+    # 코 + 두 눈 모두 신뢰도 충분 → 정면
+    eyes_ok = (l_eye[2] >= kp_conf_threshold and r_eye[2] >= kp_conf_threshold)
+    nose_ok = nose[2] >= kp_conf_threshold
+
+    if nose_ok and eyes_ok:
+        # 양 눈 사이 거리 vs 눈-귀 거리 비율로도 확인 가능. 일단 단순 판정.
+        return "front"
+
+    # 한쪽 눈/귀만 명확 → 옆 모습
+    left_side_visible = (l_eye[2] >= kp_conf_threshold or l_ear[2] >= kp_conf_threshold)
+    right_side_visible = (r_eye[2] >= kp_conf_threshold or r_ear[2] >= kp_conf_threshold)
+    if left_side_visible and not right_side_visible:
+        # 카메라가 사용자의 왼쪽 보임 → 사용자가 자기 오른쪽으로 고개 돌림
+        return "side_right"
+    if right_side_visible and not left_side_visible:
+        return "side_left"
+
+    # 어깨는 있지만 얼굴 keypoints 거의 없음 → 뒤돌거나 매우 멀리
+    return "away"
+
 log = get_logger("pose_gestures")
 
 

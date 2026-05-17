@@ -7,11 +7,12 @@ import math
 import numpy as np
 
 from src.vision.camera import (
-    KP_L_EYE, KP_L_SHOULDER, KP_L_WRIST, KP_NOSE,
-    KP_R_EYE, KP_R_SHOULDER, KP_R_WRIST,
+    KP_L_EAR, KP_L_EYE, KP_L_SHOULDER, KP_L_WRIST, KP_NOSE,
+    KP_R_EAR, KP_R_EYE, KP_R_SHOULDER, KP_R_WRIST,
 )
 from src.vision.pose_gestures import (
     GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+    face_orientation,
 )
 
 
@@ -157,3 +158,49 @@ def test_gaze_none_clears_state():
         det.process(kps)
     det.process(None)
     assert len(det.recent) == 0
+
+
+# ─── face_orientation ───
+
+def test_orientation_front():
+    """양 눈 + 코 모두 보임 → front."""
+    kps = _kps(conf=0.9)
+    assert face_orientation(kps) == "front"
+
+
+def test_orientation_side_right():
+    """사용자가 자기 오른쪽 봄 → 카메라엔 왼쪽 얼굴만 보임."""
+    kps = _kps(conf=0.9)
+    # 오른쪽 눈/귀 confidence 0으로 (kps에 r_eye만 conf=0.9, 나머지 그대로)
+    kps[KP_R_EYE] = [0.54, 0.26, 0.0]  # invisible
+    kps[KP_R_EAR] = [0.0, 0.0, 0.0]
+    kps[KP_L_EAR] = [0.40, 0.26, 0.9]   # visible
+    kps[KP_NOSE] = [0.5, 0.3, 0.05]     # 코도 잘 안보임 (옆모습)
+    assert face_orientation(kps) == "side_right"
+
+
+def test_orientation_side_left():
+    """사용자가 자기 왼쪽 봄 → 카메라엔 오른쪽 얼굴만."""
+    kps = _kps(conf=0.9)
+    kps[KP_L_EYE] = [0.46, 0.26, 0.0]
+    kps[KP_L_EAR] = [0.0, 0.0, 0.0]
+    kps[KP_R_EAR] = [0.60, 0.26, 0.9]
+    kps[KP_NOSE] = [0.5, 0.3, 0.05]
+    assert face_orientation(kps) == "side_left"
+
+
+def test_orientation_away():
+    """얼굴 keypoints 다 안 보이고 어깨만 → away."""
+    kps = _kps(conf=0.9)
+    kps[KP_NOSE] = [0.0, 0.0, 0.0]
+    kps[KP_L_EYE] = [0.0, 0.0, 0.0]
+    kps[KP_R_EYE] = [0.0, 0.0, 0.0]
+    kps[KP_L_EAR] = [0.0, 0.0, 0.0]
+    kps[KP_R_EAR] = [0.0, 0.0, 0.0]
+    assert face_orientation(kps) == "away"
+
+
+def test_orientation_unknown_no_shoulders():
+    kps = _kps(conf=0.0)   # 다 invisible
+    assert face_orientation(kps) == "unknown"
+    assert face_orientation(None) == "unknown"

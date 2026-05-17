@@ -21,6 +21,7 @@ from src.vision.person_detector import PersonDetector
 from src.vision import photo_memory
 from src.vision.pose_gestures import (
     GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+    face_orientation,
 )
 from src.vision.pose_stabilizer import PoseStabilizer
 from src.vision.wave_detector import WaveDetector
@@ -84,6 +85,9 @@ async def run_vision(
     import random as _r
     next_snapshot_at = time.time() + 180.0
     last_snapshot_cleanup = 0.0
+    # 얼굴 방향 트래킹 — 옆모습/뒷모습일 땐 정면 가정 detector 정지
+    last_orientation = "unknown"
+    last_orientation_log_at = 0.0
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
@@ -131,14 +135,35 @@ async def run_vision(
                     else:
                         last_keypoints = biggest.keypoints
 
+                    # 얼굴 방향 — 옆/뒷모습이면 정면 가정 detector & 거리 비교 정지
+                    orientation = face_orientation(last_keypoints)
+                    now_ot = time.time()
+                    if (orientation != last_orientation
+                            and now_ot - last_orientation_log_at > 10.0):
+                        last_orientation_log_at = now_ot
+                        if orientation in ("side_left", "side_right", "away"):
+                            log.info(f"얼굴 방향: {orientation} — 정면 detector 일시 정지")
+                            try:
+                                from src.brain import memory as _mem
+                                _mem.log_user(
+                                    f"(옆 모습 보임 — {orientation})",
+                                    kind="orientation",
+                                )
+                            except Exception:
+                                pass
+                    last_orientation = orientation
+
                     # 거리 변화 멘트 — 8프레임 median으로 안정화 후 비교
-                    # (pose bbox가 매 프레임 흔들려 single sample 비교는 노이즈)
-                    if cur_dist > 0:
+                    # 옆/뒷모습일 땐 bbox 신뢰 불가 → 거리 비교 skip
+                    front_facing = orientation == "front"
+                    if cur_dist > 0 and front_facing:
                         dist_window.append(cur_dist)
+                    elif not front_facing:
+                        dist_window.clear()
                     locked_ok = pose_stab is None or pose_stab.is_locked
                     if (len(dist_window) >= dist_window.maxlen
                             and last_distance_for_comment is not None
-                            and locked_ok
+                            and locked_ok and front_facing
                             and face is not None and ctx is not None):
                         sorted_w = sorted(dist_window)
                         smoothed = sorted_w[len(sorted_w) // 2]   # median
@@ -234,28 +259,40 @@ async def run_vision(
                     # pose 모드: 추가 제스처들 (lock된 상태에서만)
                     if (gesture_gate_ok and last_keypoints is not None
                             and hands_up_detector is not None):
+                        # 손 관련 — 옆모습 OK (한쪽 손만 보여도 작동 가능)
                         if hands_up_detector.process(last_keypoints):
                             emit_event(SensorEvent(
                                 type=SensorEventType.GESTURE_HANDS_UP, data={},
                             ))
-                        if head_nod_detector is not None and head_nod_detector.process(
-                            last_keypoints,
-                        ):
-                            emit_event(SensorEvent(
-                                type=SensorEventType.GESTURE_HEAD_NOD, data={},
-                            ))
-                        if head_shake_detector is not None and head_shake_detector.process(
-                            last_keypoints,
-                        ):
-                            emit_event(SensorEvent(
-                                type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
-                            ))
-                        if gaze_detector is not None and gaze_detector.process(
-                            last_keypoints,
-                        ):
-                            emit_event(SensorEvent(
-                                type=SensorEventType.GAZE_AT_ME, data={},
-                            ))
+                        # 머리/시선 관련 — 정면일 때만 의미 있음
+                        if orientation == "front":
+                            if head_nod_detector is not None and head_nod_detector.process(
+                                last_keypoints,
+                            ):
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GESTURE_HEAD_NOD, data={},
+                                ))
+                            if head_shake_detector is not None and head_shake_detector.process(
+                                last_keypoints,
+                            ):
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
+                                ))
+                            if gaze_detector is not None and gaze_detector.process(
+                                last_keypoints,
+                            ):
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GAZE_AT_ME, data={},
+                                ))
+                        else:
+                            # 옆/뒤 — 머리 detector 상태 reset해서 다음 정면 복귀
+                            # 시 깔끔히 다시 시작
+                            if head_nod_detector is not None:
+                                head_nod_detector.reset()
+                            if head_shake_detector is not None:
+                                head_shake_detector.reset()
+                            if gaze_detector is not None:
+                                gaze_detector.reset()
                     cur_emotion: str | None = None
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)
