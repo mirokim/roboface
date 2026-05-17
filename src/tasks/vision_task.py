@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from collections.abc import Callable
 
 from src.brain.perception import PerceptionState
@@ -72,8 +73,9 @@ async def run_vision(
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
-    # 거리 변화 감지 — 30cm 이상 가까워지거나 멀어지면 멘트
+    # 거리 변화 감지 — 안정화 위해 최근 N개 median으로 비교
     last_distance_for_comment: float | None = None
+    dist_window: deque[float] = deque(maxlen=8)
     last_diag_log_at = 0.0
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
@@ -122,34 +124,44 @@ async def run_vision(
                     else:
                         last_keypoints = biggest.keypoints
 
-                    # 거리 변화 멘트 — 큰 변화(50cm 이상)만 + lock 상태일 때만
+                    # 거리 변화 멘트 — 8프레임 median으로 안정화 후 비교
+                    # (pose bbox가 매 프레임 흔들려 single sample 비교는 노이즈)
+                    if cur_dist > 0:
+                        dist_window.append(cur_dist)
                     locked_ok = pose_stab is None or pose_stab.is_locked
-                    if (cur_dist > 0 and last_distance_for_comment is not None
+                    if (len(dist_window) >= dist_window.maxlen
+                            and last_distance_for_comment is not None
                             and locked_ok
                             and face is not None and ctx is not None):
-                        delta = cur_dist - last_distance_for_comment
-                        if delta < -50:
+                        sorted_w = sorted(dist_window)
+                        smoothed = sorted_w[len(sorted_w) // 2]   # median
+                        delta = smoothed - last_distance_for_comment
+                        if delta < -60:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(),
                                 kind="distance_closer",
-                                cooldown_sec=120.0,
+                                cooldown_sec=180.0,
                             )
-                            last_distance_for_comment = cur_dist
-                        elif delta > 50:
+                            last_distance_for_comment = smoothed
+                        elif delta > 60:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.farther_message(),
                                 kind="distance_farther",
-                                cooldown_sec=120.0,
+                                cooldown_sec=180.0,
                             )
-                            last_distance_for_comment = cur_dist
-                    elif cur_dist > 0 and last_distance_for_comment is None:
-                        last_distance_for_comment = cur_dist
+                            last_distance_for_comment = smoothed
+                    elif (len(dist_window) >= dist_window.maxlen
+                            and last_distance_for_comment is None):
+                        sorted_w = sorted(dist_window)
+                        last_distance_for_comment = sorted_w[len(sorted_w) // 2]
                 else:
                     # 사람 없음 — pose stab에 0 push해서 lock 자연스럽게 풀림
+                    # 거리 윈도우도 비움 (재등장 시 기준 새로 잡기)
                     if pose_stab is not None:
                         pose_stab.update(None, 0.0)
+                    dist_window.clear()
                     if (perception.person_present
                             and time.time() - perception.last_person_seen_at
                             > detector.away_timeout_sec):
