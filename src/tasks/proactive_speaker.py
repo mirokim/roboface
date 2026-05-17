@@ -89,6 +89,8 @@ async def fire_trigger(
 
     memory.log_proactive(trig.kind, message)
     ctx.last_proactive_at = time.time()
+    if trig.kind == "greeting":
+        ctx.last_greeting_at = ctx.last_proactive_at
 
     # 잠시 후 복귀
     await asyncio.sleep(0.5)

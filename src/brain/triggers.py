@@ -91,21 +91,25 @@ def check_work_break(
     return None
 
 
+GREETING_COOLDOWN_SEC = 300.0   # 같은 사람에게 5분 안엔 다시 인사 안 함
+
+
 def check_greeting(ctx: StateContext) -> Optional[ProactiveTrigger]:
-    """방금 등장한 사용자에게 인사."""
+    """방금 등장한 사용자에게 인사. 직전 인사 후 cooldown 동안엔 skip."""
     if ctx.state == State.GREETING:
         return None
     if not ctx.user_present:
         return None
+    # 마지막 인사 (greeting/wave/hands_up/reappear)와 충분한 간격
+    if ctx.last_greeting_at and time.time() - ctx.last_greeting_at < GREETING_COOLDOWN_SEC:
+        return None
     # 등장 직후 (last_user_seen_at이 매우 최근에 set됨)
     if ctx.last_user_seen_at and time.time() - ctx.last_user_seen_at < 3.0:
-        # 그 직전 부재가 충분히 길었나? (단순 절전 깨우기와 구분)
-        # 실제 구현은 sensor manager에서 이벤트 흐름으로 판단
         return ProactiveTrigger(
             kind="greeting",
             priority=8,
             context={},
-            suggested_message=None,  # LLM이 시간대 보고 결정
+            suggested_message=None,
         )
     return None
 
@@ -131,53 +135,52 @@ def check_long_silence(ctx: StateContext) -> Optional[ProactiveTrigger]:
 # 트리거 발동 시 현재 상황에서 적합한 풀들 합쳐서 랜덤 선택.
 
 _CHITCHAT_GENERIC = (
-    "오늘은 좀 어때?",
-    "잘 지내고 있어?",
-    "지금 뭐 하고 있어?",
-    "기분은 어때?",
-    "잘 하고 있어, 그 페이스 좋아.",
-    "조금 쉬어도 괜찮아.",
-    "심호흡 한번 해볼래?",
-    "괜찮아? 너무 무리하지 마.",
+    "오늘은 좀 어때?", "잘 지내고 있어?", "지금 뭐 하고 있어?",
+    "기분은 어때?", "잘 하고 있어, 그 페이스 좋아.",
+    "조금 쉬어도 괜찮아.", "심호흡 한번 해볼래?",
+    "괜찮아? 너무 무리하지 마.", "어깨 좀 펴봐.",
+    "오늘 무슨 좋은 일 있어?", "음, 뭔가 생각 중이야?",
+    "여기 같이 있어줘서 좋다.", "잠깐 멍 때려도 좋아.",
+    "있잖아, 그냥 인사하고 싶었어.", "뭔가 노래 하나 흥얼거리고 싶어진다.",
+    "오늘 한 가지만 잘하면 그걸로 충분해.", "딴 생각 좀 해도 돼.",
+    "지금 이 순간도 나쁘지 않잖아?",
 )
 
 _CHITCHAT_HOT = (
-    "더워… 에어컨 좀 켤까?",
-    "물 자주 마셔, 더운 날이야.",
-    "선풍기라도 켤까?",
-    "땀나는데, 잠깐 시원한 데 가있을래?",
+    "더워… 에어컨 좀 켤까?", "물 자주 마셔, 더운 날이야.",
+    "선풍기라도 켤까?", "땀나는데, 잠깐 시원한 데 가있을래?",
+    "이런 날엔 시원한 거 한 잔.", "더위 먹겠어.",
+    "얼음 동동 띄운 음료 어때?",
 )
 
 _CHITCHAT_WARM = (
-    "오늘 좀 후덥지근하네.",
-    "물 한 잔 어때?",
-    "환기 한 번 시킬까?",
+    "오늘 좀 후덥지근하네.", "물 한 잔 어때?", "환기 한 번 시킬까?",
+    "창문 좀 열까?", "조금 더운 거 같아.",
 )
 
 _CHITCHAT_COOL = (
-    "쌀쌀한데 따뜻한 거 한 잔 어때?",
-    "스웨터 하나 걸치자.",
-    "따뜻한 차 한 잔 어때?",
+    "쌀쌀한데 따뜻한 거 한 잔 어때?", "스웨터 하나 걸치자.",
+    "따뜻한 차 한 잔 어때?", "감기 조심해.",
+    "이불 가져올까?",
 )
 
 _CHITCHAT_COLD = (
-    "춥다… 히터 켤까?",
-    "추워서 떨려. 담요 어디 있어?",
-    "이런 날엔 핫초코지.",
-    "발 시리지 않아? 따뜻하게 입어.",
+    "춥다… 히터 켤까?", "추워서 떨려. 담요 어디 있어?",
+    "이런 날엔 핫초코지.", "발 시리지 않아? 따뜻하게 입어.",
+    "손이 차갑겠다. 따뜻하게 해.",
 )
 
 _CHITCHAT_MORNING = (
-    "좋은 아침이야!",
-    "오늘 컨디션 어때?",
-    "아침은 챙겨 먹었어?",
-    "오늘 하루도 화이팅.",
+    "좋은 아침이야!", "오늘 컨디션 어때?", "아침은 챙겨 먹었어?",
+    "오늘 하루도 화이팅.", "오늘 뭐 할 거야?",
+    "굿모닝, 잘 잤어?", "오늘 날씨 어떨까?",
+    "오늘은 또 어떤 하루가 될까?",
 )
 
 _CHITCHAT_LUNCH = (
-    "점심 뭐 먹을 거야?",
-    "벌써 점심 시간이네.",
-    "맛있는 거 먹어.",
+    "점심 뭐 먹을 거야?", "벌써 점심 시간이네.", "맛있는 거 먹어.",
+    "배 안 고파?", "점심 잘 챙겨 먹어야 해.",
+    "오늘 점심은 뭐가 끌려?",
 )
 
 _CHITCHAT_AFTERNOON = (
@@ -200,6 +203,10 @@ _CHITCHAT_WORK_LONG = (
     "허리 똑바로! 자세 무너졌어.",
     "기지개 한번 쫙 펴봐.",
     "물 마시러 일어나자.",
+    "잠깐 일어나서 걸어볼래?",
+    "스트레칭 한번 어때?",
+    "눈이 피로하지 않아? 잠깐 멀리 보자.",
+    "휴식이 곧 효율이야.",
 )
 
 
@@ -257,11 +264,16 @@ def _build_chitchat_pool(
 def _pick_chitchat_message(
     perception: PerceptionState | None,
     work_minutes: float | None,
+    user_name: str | None = None,
 ) -> str:
     pools = _build_chitchat_pool(perception, work_minutes)
-    # 풀 중 하나 선택 → 그 안에서 멘트 하나 선택 (균등 가중치)
     chosen_pool = random.choice(pools)
-    return random.choice(chosen_pool)
+    msg = random.choice(chosen_pool)
+    # 이름 알면 40% 확률로 prefix
+    if user_name and random.random() < 0.4:
+        prefix = random.choice([f"{user_name}아, ", f"{user_name}, ", f"{user_name}! "])
+        msg = prefix + msg
+    return msg
 
 
 def check_chitchat(
@@ -288,7 +300,9 @@ def check_chitchat(
     if current_session_id is not None:
         work_minutes = memory.current_work_duration(current_session_id) / 60
 
-    msg = _pick_chitchat_message(perception, work_minutes)
+    msg = _pick_chitchat_message(
+        perception, work_minutes, user_name=getattr(ctx, "user_name", None),
+    )
     ctx_data: dict = {}
     if perception is not None and perception.temperature_c is not None:
         ctx_data["temperature_c"] = perception.temperature_c

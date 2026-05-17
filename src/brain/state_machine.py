@@ -28,6 +28,8 @@ class StateContext:
     entered_at: float = field(default_factory=time.time)
     last_user_seen_at: float | None = None
     last_proactive_at: float | None = None
+    # 마지막 인사 (greeting/reappear/wave/hands_up) 시각 — 인사 반복 방지
+    last_greeting_at: float | None = None
     user_present: bool = False
     # ambient_motion이 서보를 점유 중일 때 True — head_tracker가 양보.
     ambient_motion_active: bool = False

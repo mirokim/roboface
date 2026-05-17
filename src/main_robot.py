@@ -208,7 +208,7 @@ def _handle_sensor_event(
         if absence_sec > 30:
             behavior_speaker.say(
                 face, ctx,
-                behavior_speaker.reappear_message(absence_sec),
+                behavior_speaker.reappear_message(absence_sec, ctx),
                 kind="reappear",
                 cooldown_sec=20.0,
             )
@@ -290,6 +290,7 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     ctx.transition(State.GREETING, face)
     msg = random.choice(_HANDS_UP_REPLIES)
     log.info(f"🗣️  {msg}")
+    ctx.last_greeting_at = time.time()
     speech_task = asyncio.create_task(fake_speak(face, msg))
     await asyncio.sleep(0)
     try:
@@ -316,8 +317,9 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
         return
     face.apply_expression(HAPPY)
     ctx.transition(State.GREETING, face)
-    greeting = random.choice(_WAVE_GREETINGS)
+    greeting = behavior_speaker.wave_back_message(ctx)
     log.info(f"🗣️  {greeting}")
+    ctx.last_greeting_at = time.time()
     # fake_speak가 내부에서 face.show_speech 호출. 첫 await 대기 없이
     # 즉시 노출되도록 task 생성 직후 한 번 yield해서 task가 실행되게 함.
     speech_task = asyncio.create_task(fake_speak(face, greeting))
