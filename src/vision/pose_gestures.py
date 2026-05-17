@@ -89,20 +89,25 @@ class HandsUpDetector:
 # ─── 고개 끄덕임 / 도리도리 ───
 
 class _HeadOscillationDetector:
-    """공통 — 코 좌표 한 축의 진동 감지. 끄덕임(y)/도리도리(x) 공용."""
+    """공통 — 코 좌표 한 축의 진동 감지. 끄덕임(y)/도리도리(x) 공용.
 
-    KP_CONF_THRESHOLD = 0.15
+    HigherHRNet keypoint 노이즈가 의도적 머리 움직임 진폭과 비슷해 false
+    positive가 자주 발생. 임계값 매우 보수적으로 — 명확한 의도적 동작만
+    잡힘. 적당히 흔들면 안 잡힘 (의도적이고 큰 동작 필요).
+    """
+
+    KP_CONF_THRESHOLD = 0.20   # keypoint 신뢰도 더 엄격
 
     def __init__(
         self,
-        axis: int,   # 0 = x (도리도리), 1 = y (끄덕임)
+        axis: int,
         fps: float = 5.0,
-        history_sec: float = 1.2,
-        cooldown_sec: float = 4.0,
-        min_amp: float = 0.025,
-        max_amp: float = 0.15,
-        min_zc: int = 3,
-        max_zc: int = 8,
+        history_sec: float = 1.8,    # 더 긴 sustained 동작 필요
+        cooldown_sec: float = 10.0,  # 한 번 감지 후 10초 차단
+        min_amp: float = 0.06,       # 어깨너비 대비 6% 이상 진폭
+        max_amp: float = 0.12,       # 12% 넘으면 일반 머리 회전
+        min_zc: int = 5,             # 2.5 사이클 이상 (확실한 패턴)
+        max_zc: int = 10,
     ) -> None:
         self.axis = axis
         self.history_max = max(6, int(fps * history_sec))
@@ -137,20 +142,36 @@ class _HeadOscillationDetector:
         sw = float(abs(l_sh[0] - r_sh[0]))
         if sw < 0.02:
             return False
+        # 어깨 자체가 움직이면 (사람이 위치 이동) 머리 동작이 아님 — track 따로
+        # 시계열에 어깨 중심도 push해서 분리 확인
         self.history.append(float(nose[self.axis]))
         self._shoulder_widths.append(sw)
+        # 어깨 중심 좌표도 같은 축으로 push
+        if not hasattr(self, "_shoulder_axis_history"):
+            from collections import deque as _dq
+            self._shoulder_axis_history = _dq(maxlen=self.history_max)
+        if self.axis == 0:
+            sh_axis = float((l_sh[0] + r_sh[0]) / 2)
+        else:
+            sh_axis = float((l_sh[1] + r_sh[1]) / 2)
+        self._shoulder_axis_history.append(sh_axis)
         if len(self.history) < self.history_max:
             return False
         np = _get_numpy()
         if np is None:
             return False
         arr = np.fromiter(self.history, dtype=np.float32)
+        sh_arr = np.fromiter(self._shoulder_axis_history, dtype=np.float32)
         amp = float(arr.max() - arr.min())
+        sh_amp = float(sh_arr.max() - sh_arr.min())
         sw_med = float(np.median(np.fromiter(
             self._shoulder_widths, dtype=np.float32,
         )))
-        # 어깨너비 대비로 정규화 (거리 무관)
         amp_ratio = amp / sw_med if sw_med > 0 else 0.0
+        sh_amp_ratio = sh_amp / sw_med if sw_med > 0 else 0.0
+        # 어깨가 머리와 비슷하게 움직였으면 머리 동작 아님 (몸 전체 흔들림)
+        if sh_amp_ratio > amp_ratio * 0.5:
+            return False
         if amp_ratio < self.min_amp or amp_ratio > self.max_amp:
             return False
         median = float(np.median(arr))
@@ -161,6 +182,7 @@ class _HeadOscillationDetector:
         self._last_at = time.time()
         self.history.clear()
         self._shoulder_widths.clear()
+        self._shoulder_axis_history.clear()
         return True
 
 
