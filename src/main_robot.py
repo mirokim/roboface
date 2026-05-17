@@ -159,6 +159,9 @@ async def run_robot() -> None:
             if lcd is not None:
                 # SPI 전송 동안 다른 async task 진행 (dance, fake_speak 등)
                 await lcd.render_async(face)
+                # ILI9341은 vsync 없어 너무 빨리 갱신하면 tearing/flicker.
+                # ~20 FPS로 제한 (1/20 - 평균 SPI 30ms = 20ms 추가 sleep).
+                await asyncio.sleep(0.02)
             else:
                 await asyncio.sleep(0.033)  # ~30 FPS
     finally:
