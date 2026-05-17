@@ -137,6 +137,14 @@ async def run_vision(
                         smoothed = sorted_w[len(sorted_w) // 2]   # median
                         delta = smoothed - last_distance_for_comment
                         if delta < -60:
+                            try:
+                                from src.brain import memory as _mem
+                                _mem.log_user(
+                                    f"(가까이 옴 — {int(smoothed)}cm)",
+                                    kind="distance_closer",
+                                )
+                            except Exception:
+                                pass
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(),
@@ -145,6 +153,14 @@ async def run_vision(
                             )
                             last_distance_for_comment = smoothed
                         elif delta > 60:
+                            try:
+                                from src.brain import memory as _mem
+                                _mem.log_user(
+                                    f"(멀어짐 — {int(smoothed)}cm)",
+                                    kind="distance_farther",
+                                )
+                            except Exception:
+                                pass
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.farther_message(),
@@ -260,6 +276,14 @@ async def run_vision(
                                             f"😊 인식: {match.name} "
                                             f"(conf={match.confidence:.3f})"
                                         )
+                                        try:
+                                            from src.brain import memory as _mem
+                                            _mem.log_user(
+                                                f"(얼굴 인식: {match.name})",
+                                                kind="face_recognized",
+                                            )
+                                        except Exception:
+                                            pass
                                         if face is not None and ctx is not None:
                                             from src.face.expressions import HAPPY
                                             flash_expression(face, HAPPY, 1.0)

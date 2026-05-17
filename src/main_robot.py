@@ -214,6 +214,10 @@ def _handle_sensor_event(
         # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정 + 부재 시간 기반 멘트
         flash_expression(face, SURPRISED, 0.45)
         # 30초 미만이면 재등장 멘트 굳이 X (계속 있는 것과 구분 안 됨)
+        # Claude 에이전트 컨텍스트용 이벤트 로그
+        memory.log_user(
+            f"(등장 — 부재 {int(absence_sec)}초)", kind="presence_new",
+        )
         if absence_sec > 30:
             behavior_speaker.say(
                 face, ctx,
@@ -225,6 +229,7 @@ def _handle_sensor_event(
         ctx.user_present = False
         if ctx.state != State.IDLE:
             ctx.transition(State.IDLE, face)
+        memory.log_user("(자리 비움)", kind="presence_left")
     elif ev.type == SensorEventType.ENV_TEMP:
         temp = ev.data.get("value")
         if temp is not None:
@@ -233,15 +238,19 @@ def _handle_sensor_event(
                 perception.temperature_c = float(temp)
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
+        memory.log_user("(손 흔듦)", kind="gesture_wave")
         asyncio.create_task(_wave_back(ctx, face, servos))
     elif ev.type == SensorEventType.GESTURE_HANDS_UP:
         log.info("🙌 hands up 응답 시작")
+        memory.log_user("(양손 만세)", kind="gesture_hands_up")
         asyncio.create_task(_hands_up_back(ctx, face, servos))
     elif ev.type == SensorEventType.GESTURE_HEAD_NOD:
         log.info("👍 head nod 응답 시작")
+        memory.log_user("(끄덕임 — yes)", kind="gesture_nod")
         asyncio.create_task(_simple_reply(ctx, face, _HEAD_NOD_REPLIES, "nod"))
     elif ev.type == SensorEventType.GESTURE_HEAD_SHAKE:
         log.info("🙅 head shake 응답 시작")
+        memory.log_user("(도리도리 — no)", kind="gesture_shake")
         asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES, "shake"))
 
 
