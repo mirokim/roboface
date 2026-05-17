@@ -140,7 +140,10 @@ async def dance(
                 if cur_beat % 2 == 0:
                     next_expr = _DANCE_EXPRESSIONS[expr_idx % len(_DANCE_EXPRESSIONS)]
                     expr_idx += 1
-                    face.apply_expression(next_expr)
+                    # 표정만 갱신, blink trigger 안 함 (apply_expression이 매번
+                    # 깜빡거리면 dance 중 LCD가 깜빡임처럼 보임)
+                    face.expression = next_expr
+                    face.eye_state.shape = next_expr.eye
                     face.mouth_state.shape = random.choice(_DANCE_MOUTHS)
 
             await asyncio.sleep(dt)

@@ -37,7 +37,7 @@ class LCDRenderer:
     pygame Surface에 그린 후 SPI로 LCD 전송.
     """
 
-    def __init__(self, rotation: int = 90, baudrate: int = 40_000_000):
+    def __init__(self, rotation: int = 90, baudrate: int = 32_000_000):
         # Pi GPIO/SPI 의존성은 robot 모드에서만 import
         import board
         import digitalio
