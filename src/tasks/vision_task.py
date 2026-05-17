@@ -126,6 +126,14 @@ async def run_vision(
                             f"lock={'O' if pose_stab.is_locked else 'X'}"
                             f"(score~{avg_score:.3f}/{pose_stab.lock_min_score})"
                         )
+                    # wave diag (WristWaveDetector만)
+                    if isinstance(wave_detector, WristWaveDetector):
+                        d = wave_detector.diag()
+                        parts.append(
+                            f"wave=L{d['left']}/R{d['right']}"
+                            f"(amp L{d['l_amp_ratio']:.2f}/R{d['r_amp_ratio']:.2f}"
+                            f" need≥{d['need_amp']})"
+                        )
                     if hands_up_detector is not None:
                         d = hands_up_detector.diag()
                         parts.append(f"hands_up={d['consecutive']}/{d['need']}")

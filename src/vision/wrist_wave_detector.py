@@ -79,6 +79,34 @@ class WristWaveDetector:
         self.right_history.clear()
         self.shoulder_width_history.clear()
 
+    def diag(self) -> dict:
+        """현재 진행 상황 — vision_task가 5초마다 로그로 출력."""
+        np = _get_numpy()
+        l_amp = r_amp = -1.0
+        if np is not None and len(self.left_history) >= self.min_eval_frames:
+            arr = np.fromiter(self.left_history, dtype=np.float32)
+            l_amp = float(arr.max() - arr.min())
+        if np is not None and len(self.right_history) >= self.min_eval_frames:
+            arr = np.fromiter(self.right_history, dtype=np.float32)
+            r_amp = float(arr.max() - arr.min())
+        sw_med = -1.0
+        if np is not None and self.shoulder_width_history:
+            sw_med = float(np.median(np.fromiter(
+                self.shoulder_width_history, dtype=np.float32,
+            )))
+        return {
+            "left": len(self.left_history),
+            "right": len(self.right_history),
+            "need": self.min_eval_frames,
+            "max": self.history_max,
+            "l_amp_ratio": l_amp / sw_med if sw_med > 0 and l_amp > 0 else 0.0,
+            "r_amp_ratio": r_amp / sw_med if sw_med > 0 and r_amp > 0 else 0.0,
+            "need_amp": self.min_amplitude_ratio,
+            "cooldown_remain": max(
+                0.0, self.cooldown_sec - (time.time() - self.last_wave_at),
+            ),
+        }
+
     def process(self, keypoints: Any) -> bool:
         """keypoints: shape (17, 3) — (x, y, conf), 0~1 정규화. 감지되면 True."""
         if keypoints is None:
