@@ -37,7 +37,7 @@ class LCDRenderer:
     pygame Surface에 그린 후 SPI로 LCD 전송.
     """
 
-    def __init__(self, rotation: int = 90, baudrate: int = 32_000_000):
+    def __init__(self, rotation: int = 90, baudrate: int = 24_000_000):
         # Pi GPIO/SPI 의존성은 robot 모드에서만 import
         import board
         import digitalio
@@ -78,6 +78,9 @@ class LCDRenderer:
         from PIL import Image
         self._Image = Image
 
+        # 이전 프레임 raw bytes — 동일하면 SPI 송신 skip (깜빡임 완화)
+        self._last_raw: bytes | None = None
+
         log.info(f"LCD 초기화 완료 (rotation={rotation}, "
                  f"baud={baudrate / 1e6:.0f}MHz, {DISPLAY_WIDTH}×{DISPLAY_HEIGHT})")
 
@@ -85,6 +88,9 @@ class LCDRenderer:
         """동기 렌더 (호환용) — SPI 전송이 이벤트 루프 블로킹."""
         draw_face_to_surface(self.canvas, face)
         raw = pygame.image.tostring(self.canvas, "RGB")
+        if raw == self._last_raw:
+            return   # 픽셀 변화 없음 → 송신 skip
+        self._last_raw = raw
         pil = self._Image.frombytes("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), raw)
         self.disp.image(pil)
 
@@ -92,10 +98,13 @@ class LCDRenderer:
         """비동기 렌더 — SPI 전송을 executor로 빼서 이벤트 루프 안 멈추게.
 
         pygame 캔버스 그리기는 main thread (pygame이 thread-safe 아님),
-        SPI 전송만 백그라운드 thread.
+        SPI 전송만 백그라운드 thread. 이전 프레임과 동일하면 송신 skip.
         """
         draw_face_to_surface(self.canvas, face)
         raw = pygame.image.tostring(self.canvas, "RGB")
+        if raw == self._last_raw:
+            return
+        self._last_raw = raw
         pil = self._Image.frombytes("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), raw)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self.disp.image, pil)
