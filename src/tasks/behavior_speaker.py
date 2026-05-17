@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 
 from src.audio.fake_tts import speak as fake_speak
+from src.brain import memory
 from src.brain.state_machine import State, StateContext
 from src.brain.triggers import _is_quiet_hours
 from src.face.expressions import Expression
@@ -72,6 +73,10 @@ def say(
     ctx.last_proactive_at = now
     if kind in _GREETING_KINDS:
         ctx.last_greeting_at = now
+    try:
+        memory.log_robot(text, kind=kind)
+    except Exception as e:
+        log.debug(f"conversation log 실패: {e}")
     return True
 
 
@@ -97,6 +102,16 @@ def _name_prefix(ctx: StateContext) -> str:
         return ""
     suffix = random.choice([f"{name}아, ", f"{name}, ", f"{name}! "])
     return suffix
+
+
+def _pick_fresh(pool: tuple[str, ...], minutes: float = 30.0) -> str:
+    """풀에서 최근 N분 동안 안 한 멘트 우선 선택."""
+    try:
+        recent = set(memory.recent_robot_messages(minutes=minutes))
+    except Exception:
+        recent = set()
+    fresh = [m for m in pool if not any(m in r for r in recent)]
+    return random.choice(fresh if fresh else pool)
 
 
 # ─── 짧은 부재 후 재등장 (60초 미만) ───
@@ -166,46 +181,47 @@ FACE_GREETING_TEMPLATES = (
 
 
 def reappear_message(absence_sec: float, ctx: StateContext) -> str:
-    """부재 시간 + 시간대 + 이름 조합으로 멘트 선택."""
+    """부재 시간 + 시간대 + 이름 조합으로 멘트 선택. 최근 발화 안 반복."""
     name_pre = _name_prefix(ctx)
     period = _now_period()
-    # 매우 긴 부재면 longing 느낌
     if absence_sec >= 600:
-        base = random.choice(REAPPEAR_LONG)
+        pool = REAPPEAR_LONG
     elif absence_sec >= 60:
-        # 시간대 인사 섞기 (반반)
-        if random.random() < 0.5:
-            base = random.choice(TIME_GREETINGS.get(period, REAPPEAR_MEDIUM))
-        else:
-            base = random.choice(REAPPEAR_MEDIUM)
+        pool = (TIME_GREETINGS.get(period, ()) + REAPPEAR_MEDIUM
+                if random.random() < 0.5 else REAPPEAR_MEDIUM)
     else:
-        base = random.choice(REAPPEAR_SHORT)
+        pool = REAPPEAR_SHORT
+    base = _pick_fresh(pool)
     return name_pre + base
 
 
 def closer_message() -> str:
-    return random.choice(GOT_CLOSER)
+    return _pick_fresh(GOT_CLOSER)
 
 
 def farther_message() -> str:
-    return random.choice(GOT_FARTHER)
+    return _pick_fresh(GOT_FARTHER)
 
 
 def face_greeting_message(name: str) -> str:
-    return random.choice(FACE_GREETING_TEMPLATES).format(name=name)
+    template = _pick_fresh(FACE_GREETING_TEMPLATES)
+    return template.format(name=name)
+
+
+_WAVE_SHORT = (
+    "안녕?", "어, 안녕!", "반가워!", "오, 손 흔들어줬네!",
+    "안녕 안녕!", "헤이~", "와, 봐줘서 좋아.",
+    "오, 너구나!", "보고 싶었어.",
+)
 
 
 def wave_back_message(ctx: StateContext) -> str:
-    """손 흔들기 답례 — 시간대 + 이름 인식."""
+    """손 흔들기 답례 — 시간대 + 이름 인식 + 최근 발화 안 반복."""
     period = _now_period()
     name_pre = _name_prefix(ctx)
-    # 절반은 시간대 인사, 절반은 짧은 hey 류
     if random.random() < 0.5:
-        base = random.choice(TIME_GREETINGS.get(period, ("안녕!",)))
+        pool = TIME_GREETINGS.get(period, _WAVE_SHORT)
     else:
-        base = random.choice([
-            "안녕?", "어, 안녕!", "반가워!", "오, 손 흔들어줬네!",
-            "안녕 안녕!", "헤이~", "와, 봐줘서 좋아.",
-            "오, 너구나!", "보고 싶었어.",
-        ])
+        pool = _WAVE_SHORT
+    base = _pick_fresh(pool)
     return name_pre + base

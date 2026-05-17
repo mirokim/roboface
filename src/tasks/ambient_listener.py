@@ -16,6 +16,7 @@ import random
 from collections.abc import AsyncIterator, Callable, Coroutine
 from typing import Any
 
+from src.brain import memory
 from src.utils.logger import get_logger
 
 log = get_logger("ambient")
@@ -67,6 +68,10 @@ class AmbientListener:
 
     async def run(self) -> None:
         async for text in self.stt.stream():
+            try:
+                memory.log_user(text, kind="ambient")
+            except Exception as e:
+                log.debug(f"conversation log 실패: {e}")
             for h in self.handlers:
                 try:
                     await h(text)

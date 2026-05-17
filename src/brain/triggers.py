@@ -267,13 +267,28 @@ def _pick_chitchat_message(
     user_name: str | None = None,
 ) -> str:
     pools = _build_chitchat_pool(perception, work_minutes)
+    # 최근 30분 robot 발화에 안 들어간 멘트 우선 — 반복 회피
+    try:
+        recent = set(memory.recent_robot_messages(minutes=30.0))
+    except Exception:
+        recent = set()
     chosen_pool = random.choice(pools)
-    msg = random.choice(chosen_pool)
+    # 같은 풀 안에서 fresh 우선
+    fresh = [m for m in chosen_pool if not _msg_in_recent(m, recent)]
+    msg = random.choice(fresh if fresh else chosen_pool)
     # 이름 알면 40% 확률로 prefix
     if user_name and random.random() < 0.4:
         prefix = random.choice([f"{user_name}아, ", f"{user_name}, ", f"{user_name}! "])
         msg = prefix + msg
     return msg
+
+
+def _msg_in_recent(msg: str, recent: set[str]) -> bool:
+    """msg가 recent에 있는지 — 이름 prefix 붙은 케이스도 부분 매칭."""
+    if msg in recent:
+        return True
+    # "OO야, ..." 같은 prefix 케이스 — recent 메시지에 msg가 substring으로 있나
+    return any(msg in r for r in recent)
 
 
 def check_chitchat(

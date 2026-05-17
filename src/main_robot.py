@@ -230,10 +230,10 @@ def _handle_sensor_event(
         asyncio.create_task(_hands_up_back(ctx, face, servos))
     elif ev.type == SensorEventType.GESTURE_HEAD_NOD:
         log.info("👍 head nod 응답 시작")
-        asyncio.create_task(_simple_reply(ctx, face, _HEAD_NOD_REPLIES))
+        asyncio.create_task(_simple_reply(ctx, face, _HEAD_NOD_REPLIES, "nod"))
     elif ev.type == SensorEventType.GESTURE_HEAD_SHAKE:
         log.info("🙅 head shake 응답 시작")
-        asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES))
+        asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES, "shake"))
 
 
 _WAVE_GREETINGS = (
@@ -272,6 +272,7 @@ _HEAD_SHAKE_REPLIES = (
 
 async def _simple_reply(
     ctx: StateContext, face: FaceState, replies: tuple[str, ...],
+    kind: str = "gesture_reply",
 ) -> None:
     """짧은 발화만 — 표정/머리는 그대로. 끄덕임/도리도리 응답용."""
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
@@ -279,6 +280,7 @@ async def _simple_reply(
     msg = random.choice(replies)
     log.info(f"🗣️  {msg}")
     asyncio.create_task(fake_speak(face, msg))
+    memory.log_robot(msg, kind=kind)
 
 
 async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
@@ -291,6 +293,7 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     msg = random.choice(_HANDS_UP_REPLIES)
     log.info(f"🗣️  {msg}")
     ctx.last_greeting_at = time.time()
+    memory.log_robot(msg, kind="hands_up_reply")
     speech_task = asyncio.create_task(fake_speak(face, msg))
     await asyncio.sleep(0)
     try:
@@ -320,6 +323,7 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     greeting = behavior_speaker.wave_back_message(ctx)
     log.info(f"🗣️  {greeting}")
     ctx.last_greeting_at = time.time()
+    memory.log_robot(greeting, kind="wave_reply")
     # fake_speak가 내부에서 face.show_speech 호출. 첫 await 대기 없이
     # 즉시 노출되도록 task 생성 직후 한 번 yield해서 task가 실행되게 함.
     speech_task = asyncio.create_task(fake_speak(face, greeting))

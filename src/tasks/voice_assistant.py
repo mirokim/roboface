@@ -207,9 +207,14 @@ class VoiceAssistant:
             self.ctx.transition(prev_state, self.face)
             return
 
-        # 대화 기록
+        # 대화 기록 — in-memory history + DB log
         self.history.append({"role": "user", "content": text})
         self.history = self.history[-_HISTORY_MAX_TURNS:]
+        try:
+            from src.brain import memory
+            memory.log_user(text, kind="voice")
+        except Exception as e:
+            log.debug(f"conv log 실패: {e}")
 
         # 사전 정의 명령 인터셉트 — Claude 거치지 않고 즉시 실행
         if await self._maybe_handle_command(text):
@@ -232,6 +237,11 @@ class VoiceAssistant:
             return
         log.info(f'🗣️  Claude: "{reply}"')
         self.history.append({"role": "assistant", "content": reply})
+        try:
+            from src.brain import memory
+            memory.log_robot(reply, kind="voice_reply")
+        except Exception as e:
+            log.debug(f"conv log 실패: {e}")
 
         # TTS 발화
         self.ctx.transition(State.TALKING, self.face)

@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS user_patterns (
     value TEXT,             -- JSON
     updated_at REAL
 );
+
+CREATE TABLE IF NOT EXISTS conversation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    speaker TEXT NOT NULL,    -- 'robot' | 'user'
+    kind TEXT,                -- 'greeting' / 'chitchat' / 'wave' / 'ambient' / 'voice_reply' 등
+    text TEXT NOT NULL,
+    context TEXT              -- JSON (시간대/온도/이름 등)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_ts ON conversation_log(ts DESC);
 """
 
 
@@ -234,3 +245,79 @@ def get_pattern(key: str, default=None):
         if not row:
             return default
         return json.loads(row["value"])
+
+
+# === Conversation Log ===
+
+def log_utterance(
+    speaker: str, text: str, kind: str | None = None,
+    context: dict | None = None,
+) -> None:
+    """robot/user 발화 한 줄 기록."""
+    if not text:
+        return
+    ctx_json = json.dumps(context, ensure_ascii=False) if context else None
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO conversation_log (ts, speaker, kind, text, context) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (time.time(), speaker, kind, text, ctx_json),
+        )
+
+
+def log_robot(text: str, kind: str | None = None, context: dict | None = None) -> None:
+    log_utterance("robot", text, kind=kind, context=context)
+
+
+def log_user(text: str, kind: str | None = None, context: dict | None = None) -> None:
+    log_utterance("user", text, kind=kind, context=context)
+
+
+def recent_robot_messages(minutes: float = 30.0) -> list[str]:
+    """최근 N분 내 robot 발화 text 리스트 (반복 회피용)."""
+    cutoff = time.time() - minutes * 60
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT text FROM conversation_log "
+            "WHERE speaker = 'robot' AND ts >= ? ORDER BY ts DESC",
+            (cutoff,),
+        ).fetchall()
+        return [r["text"] for r in rows]
+
+
+def recent_conversation(minutes: float = 10.0, limit: int = 20) -> list[dict]:
+    """최근 N분 대화 turn — voice_assistant context 등에 사용.
+
+    각 항목: {ts, speaker, kind, text, context}
+    """
+    cutoff = time.time() - minutes * 60
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT ts, speaker, kind, text, context FROM conversation_log "
+            "WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (cutoff, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            ctx = json.loads(r["context"]) if r["context"] else None
+            out.append({
+                "ts": r["ts"], "speaker": r["speaker"], "kind": r["kind"],
+                "text": r["text"], "context": ctx,
+            })
+        # 오래된 것 → 최근 순으로 반환 (LLM context 용)
+        out.reverse()
+        return out
+
+
+def today_user_utterances(limit: int = 50) -> list[str]:
+    """오늘 사용자가 한 말 (ambient + voice). 요약/회고용."""
+    today_start = datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    ).timestamp()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT text FROM conversation_log "
+            "WHERE speaker = 'user' AND ts >= ? ORDER BY ts DESC LIMIT ?",
+            (today_start, limit),
+        ).fetchall()
+        return [r["text"] for r in rows]

@@ -88,6 +88,7 @@ async def fire_trigger(
             log.debug(f"motion task 에러: {e}")
 
     memory.log_proactive(trig.kind, message)
+    memory.log_robot(message, kind=trig.kind, context=trig.context)
     ctx.last_proactive_at = time.time()
     if trig.kind == "greeting":
         ctx.last_greeting_at = ctx.last_proactive_at
