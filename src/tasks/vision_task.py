@@ -48,6 +48,8 @@ async def run_vision(
 
     detector = PersonDetector(
         min_confidence=0.1 if VISION_MODE == "pose" else 0.5,
+        # pose 모드는 score가 자주 깜빡거려 5초로는 LEFT 토글 잦음 → 15초로 완화
+        away_timeout_sec=15.0 if VISION_MODE == "pose" else 5.0,
     )
     fps = getattr(cam, "target_fps", 10.0)
     wave_detector: WaveDetector | WristWaveDetector
@@ -119,37 +121,39 @@ async def run_vision(
                         )
                     else:
                         last_keypoints = biggest.keypoints
-                elif pose_stab is not None:
-                    # 사람 없음 — score history에 0 push해서 lock 자연스럽게 풀림
-                    pose_stab.update(None, 0.0)
 
-                    # 거리 변화 멘트 — 30cm 이상 변화 시
+                    # 거리 변화 멘트 — 큰 변화(50cm 이상)만 + lock 상태일 때만
+                    locked_ok = pose_stab is None or pose_stab.is_locked
                     if (cur_dist > 0 and last_distance_for_comment is not None
+                            and locked_ok
                             and face is not None and ctx is not None):
                         delta = cur_dist - last_distance_for_comment
-                        if delta < -30:
+                        if delta < -50:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(),
                                 kind="distance_closer",
-                                cooldown_sec=60.0,
+                                cooldown_sec=120.0,
                             )
                             last_distance_for_comment = cur_dist
-                        elif delta > 30:
+                        elif delta > 50:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.farther_message(),
                                 kind="distance_farther",
-                                cooldown_sec=60.0,
+                                cooldown_sec=120.0,
                             )
                             last_distance_for_comment = cur_dist
                     elif cur_dist > 0 and last_distance_for_comment is None:
                         last_distance_for_comment = cur_dist
-                elif (
-                    perception.person_present
-                    and time.time() - perception.last_person_seen_at > detector.away_timeout_sec
-                ):
-                    perception.clear_person()
+                else:
+                    # 사람 없음 — pose stab에 0 push해서 lock 자연스럽게 풀림
+                    if pose_stab is not None:
+                        pose_stab.update(None, 0.0)
+                    if (perception.person_present
+                            and time.time() - perception.last_person_seen_at
+                            > detector.away_timeout_sec):
+                        perception.clear_person()
 
             # person_bbox 잠깐 끊겨도 1.5초까지는 이전 bbox 유지 — wave detector가
             # 손 흔들기 중 person 인식 깜빡임으로 reset되는 거 방지.
