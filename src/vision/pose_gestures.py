@@ -12,8 +12,8 @@ from typing import Any
 
 from src.utils.logger import get_logger
 from src.vision.camera import (
-    KP_L_SHOULDER, KP_L_WRIST,
-    KP_NOSE, KP_R_SHOULDER, KP_R_WRIST,
+    KP_L_EAR, KP_L_EYE, KP_L_SHOULDER, KP_L_WRIST,
+    KP_NOSE, KP_R_EAR, KP_R_EYE, KP_R_SHOULDER, KP_R_WRIST,
 )
 
 log = get_logger("pose_gestures")
@@ -208,5 +208,82 @@ class HeadShakeDetector(_HeadOscillationDetector):
     def process(self, keypoints: Any) -> bool:
         if super().process(keypoints):
             log.info("🙅 고개 도리도리 감지!")
+            return True
+        return False
+
+
+# ─── 정면 응시 (사용자가 로봇을 쳐다봄) ───
+
+class GazeAtMeDetector:
+    """사용자가 다른 곳 보고 있다가 로봇 쪽으로 시선 돌린 순간 감지.
+
+    원리:
+      매 프레임 "정면 응시 여부" 측정. nose가 두 눈 중간 가까우면 정면.
+      시간 윈도우 둘로 나눠:
+        - before: hold_sec 이전 before_window_sec 동안 mostly NOT facing (<50%)
+        - now: 최근 hold_sec 동안 mostly facing (>80%)
+      이 두 조건 동시 만족 → "시선 전환" 감지 (의도적으로 쳐다봄).
+
+    그냥 책상에 앉아 정면 향한 채 작업하는 건 (계속 facing) 감지 X.
+    """
+
+    KP_CONF_THRESHOLD = 0.20
+    OFFSET_RATIO_MAX = 0.25
+
+    def __init__(
+        self,
+        fps: float = 10.0,
+        hold_sec: float = 1.2,            # 1.2초 안정적으로 정면
+        before_window_sec: float = 2.5,   # 그 직전 2.5초 동안 다른 곳
+        cooldown_sec: float = 60.0,
+    ) -> None:
+        self.hold_frames = max(3, int(fps * hold_sec))
+        self.before_frames = max(5, int(fps * before_window_sec))
+        total = self.hold_frames + self.before_frames
+        self.recent: deque[bool] = deque(maxlen=total)
+        self.cooldown_sec = cooldown_sec
+        self._last_at = 0.0
+
+    def reset(self) -> None:
+        self.recent.clear()
+
+    def _is_facing(self, keypoints: Any) -> bool:
+        nose = keypoints[KP_NOSE]
+        l_eye = keypoints[KP_L_EYE]
+        r_eye = keypoints[KP_R_EYE]
+        if (
+            nose[2] < self.KP_CONF_THRESHOLD
+            or l_eye[2] < self.KP_CONF_THRESHOLD
+            or r_eye[2] < self.KP_CONF_THRESHOLD
+        ):
+            return False
+        eye_dist = float(abs(l_eye[0] - r_eye[0]))
+        if eye_dist < 0.015:
+            return False
+        mid_eye_x = float((l_eye[0] + r_eye[0]) / 2)
+        offset_ratio = abs(float(nose[0]) - mid_eye_x) / eye_dist
+        return offset_ratio < self.OFFSET_RATIO_MAX
+
+    def process(self, keypoints: Any) -> bool:
+        if keypoints is None:
+            self.recent.clear()
+            return False
+        if time.time() - self._last_at < self.cooldown_sec:
+            return False
+        self.recent.append(self._is_facing(keypoints))
+        if len(self.recent) < self.recent.maxlen:
+            return False
+        seq = list(self.recent)
+        before = seq[:self.before_frames]
+        now = seq[self.before_frames:]
+        before_ratio = sum(before) / len(before)
+        now_ratio = sum(now) / len(now)
+        if now_ratio > 0.80 and before_ratio < 0.50:
+            log.info(
+                f"👀 시선 전환 감지! "
+                f"(before={before_ratio:.2f}, now={now_ratio:.2f})"
+            )
+            self._last_at = time.time()
+            self.recent.clear()
             return True
         return False

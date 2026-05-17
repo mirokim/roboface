@@ -21,6 +21,7 @@ class SensorEventType(Enum):
     GESTURE_HANDS_UP = "gesture_hands_up"  # 양손 만세
     GESTURE_HEAD_NOD = "gesture_head_nod"  # 고개 끄덕임 (yes)
     GESTURE_HEAD_SHAKE = "gesture_head_shake"  # 고개 도리도리 (no)
+    GAZE_AT_ME = "gaze_at_me"              # 사용자가 로봇 정면 응시
 
 
 @dataclass

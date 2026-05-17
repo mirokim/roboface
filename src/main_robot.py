@@ -252,6 +252,10 @@ def _handle_sensor_event(
         log.info("🙅 head shake 응답 시작")
         memory.log_user("(도리도리 — no)", kind="gesture_shake")
         asyncio.create_task(_simple_reply(ctx, face, _HEAD_SHAKE_REPLIES, "shake"))
+    elif ev.type == SensorEventType.GAZE_AT_ME:
+        log.info("👀 정면 응시 응답 시작")
+        memory.log_user("(사용자가 나를 쳐다봄)", kind="gaze_at_me")
+        asyncio.create_task(_simple_reply(ctx, face, _GAZE_REPLIES, "gaze"))
 
 
 _WAVE_GREETINGS = (
@@ -285,6 +289,16 @@ _HEAD_SHAKE_REPLIES = (
     "음... 알겠어.",
     "아냐?",
     "그래, 그러지 말자.",
+)
+
+_GAZE_REPLIES = (
+    "왜?",
+    "응? 무슨 일?",
+    "왜 그래?",
+    "나 부른 거야?",
+    "응, 봐.",
+    "뭐 해줄까?",
+    "음, 부르려고?",
 )
 
 

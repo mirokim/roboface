@@ -19,7 +19,7 @@ from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision.pose_gestures import (
-    HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+    GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
 )
 from src.vision.pose_stabilizer import PoseStabilizer
 from src.vision.wave_detector import WaveDetector
@@ -57,12 +57,14 @@ async def run_vision(
     hands_up_detector: HandsUpDetector | None = None
     head_nod_detector: HeadNodDetector | None = None
     head_shake_detector: HeadShakeDetector | None = None
+    gaze_detector: GazeAtMeDetector | None = None
     pose_stab: PoseStabilizer | None = None
     if VISION_MODE == "pose":
         wave_detector = WristWaveDetector(fps=fps)
         hands_up_detector = HandsUpDetector(fps=fps)
         head_nod_detector = HeadNodDetector(fps=fps)
         head_shake_detector = HeadShakeDetector(fps=fps)
+        gaze_detector = GazeAtMeDetector(fps=fps)
         pose_stab = PoseStabilizer(fps=fps)
     else:
         wave_detector = WaveDetector(fps=fps)
@@ -242,6 +244,12 @@ async def run_vision(
                         ):
                             emit_event(SensorEvent(
                                 type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
+                            ))
+                        if gaze_detector is not None and gaze_detector.process(
+                            last_keypoints,
+                        ):
+                            emit_event(SensorEvent(
+                                type=SensorEventType.GAZE_AT_ME, data={},
                             ))
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)

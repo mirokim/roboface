@@ -7,10 +7,11 @@ import math
 import numpy as np
 
 from src.vision.camera import (
-    KP_L_SHOULDER, KP_L_WRIST, KP_NOSE, KP_R_SHOULDER, KP_R_WRIST,
+    KP_L_EYE, KP_L_SHOULDER, KP_L_WRIST, KP_NOSE,
+    KP_R_EYE, KP_R_SHOULDER, KP_R_WRIST,
 )
 from src.vision.pose_gestures import (
-    HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+    GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
 )
 
 
@@ -21,10 +22,14 @@ def _kps(
     r_wrist_x: float = 0.6, r_wrist_y: float = 0.5,
     shoulder_l_x: float = 0.4, shoulder_r_x: float = 0.6,
     shoulder_y: float = 0.4,
+    l_eye_x: float = 0.46, r_eye_x: float = 0.54,
+    eye_y: float = 0.26,
     conf: float = 0.9,
 ) -> np.ndarray:
     arr = np.zeros((17, 3), dtype=np.float32)
     arr[KP_NOSE] = [nose_x, nose_y, conf]
+    arr[KP_L_EYE] = [l_eye_x, eye_y, conf]
+    arr[KP_R_EYE] = [r_eye_x, eye_y, conf]
     arr[KP_L_SHOULDER] = [shoulder_l_x, shoulder_y, conf]
     arr[KP_R_SHOULDER] = [shoulder_r_x, shoulder_y, conf]
     arr[KP_L_WRIST] = [l_wrist_x, l_wrist_y, conf]
@@ -120,3 +125,35 @@ def test_head_shake_not_detected_when_static():
     for _ in range(20):
         kps = _kps(nose_x=0.5)
         assert not det.process(kps)
+
+
+# ─── GazeAtMeDetector ───
+
+def test_gaze_transition_detected():
+    """다른 곳 보다가 정면 향하면 감지."""
+    det = GazeAtMeDetector(fps=10.0, hold_sec=1.2, before_window_sec=2.5)
+    # before: nose가 한쪽으로 치우침 (정면 X) — 25프레임
+    kps_away = _kps(nose_x=0.42, l_eye_x=0.46, r_eye_x=0.54)
+    for _ in range(25):
+        det.process(kps_away)
+    # now: 정면 (12프레임)
+    kps_facing = _kps(nose_x=0.50, l_eye_x=0.46, r_eye_x=0.54)
+    hits = sum(1 for _ in range(15) if det.process(kps_facing))
+    assert hits == 1
+
+
+def test_gaze_continuous_facing_not_detected():
+    """계속 정면 향하면 (책상 앉아 작업 중) 감지 X."""
+    det = GazeAtMeDetector(fps=10.0, hold_sec=1.2, before_window_sec=2.5)
+    kps = _kps(nose_x=0.50, l_eye_x=0.46, r_eye_x=0.54)
+    hits = sum(1 for _ in range(40) if det.process(kps))
+    assert hits == 0
+
+
+def test_gaze_none_clears_state():
+    det = GazeAtMeDetector(fps=10.0)
+    kps = _kps(nose_x=0.50)
+    for _ in range(10):
+        det.process(kps)
+    det.process(None)
+    assert len(det.recent) == 0
