@@ -126,10 +126,11 @@ class BehaviorConfig:
     idle_look_max_interval_sec: float = 20.0
     idle_look_duration_ms: int = 800
 
-    # 작업시간
-    work_break_warn_minutes: int = 60       # 1시간
-    work_break_strong_minutes: int = 120    # 2시간
-    work_break_alarm_minutes: int = 240     # 4시간
+    # 작업시간 (앉아있기) — 자주 일어나도록 임계값 낮춤
+    work_break_gentle_minutes: int = 30     # 30분: 가볍게 환기
+    work_break_warn_minutes: int = 45       # 45분: 권유
+    work_break_strong_minutes: int = 90     # 90분: 강하게
+    work_break_alarm_minutes: int = 180     # 3시간: 알람
 
     # 자세
     posture_warn_continuous_sec: int = 600  # 10분

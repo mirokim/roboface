@@ -18,6 +18,7 @@ from src.utils.logger import get_logger
 from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
+from src.vision import photo_memory
 from src.vision.pose_gestures import (
     GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
 )
@@ -79,6 +80,10 @@ async def run_vision(
     last_distance_for_comment: float | None = None
     dist_window: deque[float] = deque(maxlen=8)
     last_diag_log_at = 0.0
+    # 포토 메모리 — 30~60분 랜덤 간격으로 1회 캡처. 시작 후 첫 캡처는 3분 뒤.
+    import random as _r
+    next_snapshot_at = time.time() + 180.0
+    last_snapshot_cleanup = 0.0
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
@@ -251,12 +256,39 @@ async def run_vision(
                             emit_event(SensorEvent(
                                 type=SensorEventType.GAZE_AT_ME, data={},
                             ))
+                    cur_emotion: str | None = None
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)
                         if emotion == EMOTION_SMILE:
                             # 사용자가 웃으면 같이 웃음 (짧게)
                             from src.face.expressions import HAPPY
                             flash_expression(face, HAPPY, 1.5)
+                            cur_emotion = "smile"
+                        else:
+                            cur_emotion = "neutral"
+
+                    # 포토 메모리 — 30~60분 랜덤 간격
+                    now_ts = time.time()
+                    if (now_ts >= next_snapshot_at
+                            and person_confirmed_this_frame
+                            and frame is not None):
+                        cur_dist = (perception.person_distance_cm
+                                    if perception and perception.person_distance_cm > 0
+                                    else None)
+                        photo_memory.save_snapshot(
+                            frame, effective_bbox,
+                            emotion=cur_emotion,
+                            distance_cm=cur_dist,
+                            user_name=(ctx.user_name if ctx else None),
+                        )
+                        next_snapshot_at = now_ts + _r.uniform(1800, 3600)  # 30-60분
+                    # 하루에 한 번 오래된 사진 정리
+                    if now_ts - last_snapshot_cleanup > 86400:
+                        last_snapshot_cleanup = now_ts
+                        try:
+                            photo_memory.purge_old()
+                        except Exception as e:
+                            log.debug(f"snapshot purge 실패: {e}")
                     # 얼굴 인식 — 매 2초 한 번 (CPU 절약)
                     if (face_memory is not None and ctx is not None
                             and time.time() - last_recognize_at > 2.0):

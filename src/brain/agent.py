@@ -172,11 +172,22 @@ def _build_situation(
         gap = time.time() - ctx.last_proactive_at
         parts.append(f"내가 마지막 발화: {int(gap)}초 전")
     parts.append(f"최근 대화:\n{recent}")
+
+    # 최근 24시간 사용자 표정 요약 (포토 메모리 기반)
+    try:
+        snap_summary = memory.snapshot_summary(hours_back=24.0)
+        if snap_summary:
+            stats = ", ".join(f"{k}={v}" for k, v in snap_summary.items())
+            parts.append(f"최근 24h 사용자 표정 통계: {stats}")
+    except Exception:
+        pass
+
     parts.append("")
     parts.append(
         "지금 무엇을 할지 도구를 호출해서 결정해. "
         "특별히 말할 거 없으면 do_nothing이 좋음. "
-        "이미 최근에 비슷한 말 했으면 또 하지 마."
+        "이미 최근에 비슷한 말 했으면 또 하지 마. "
+        "오래 앉아있었으면 가끔 쉬자고 말해도 좋아."
     )
     return "\n".join(parts)
 

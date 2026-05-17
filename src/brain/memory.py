@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS conversation_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_ts ON conversation_log(ts DESC);
+
+-- 포토 메모리: 사용자 표정 주기 캡처. 7일 후 자동 삭제.
+CREATE TABLE IF NOT EXISTS face_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    photo_path TEXT NOT NULL,
+    emotion TEXT,             -- 'smile' / 'neutral' / 'unknown'
+    distance_cm REAL,
+    user_name TEXT,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_snap_ts ON face_snapshots(ts DESC);
 """
 
 
@@ -321,3 +334,59 @@ def today_user_utterances(limit: int = 50) -> list[str]:
             (today_start, limit),
         ).fetchall()
         return [r["text"] for r in rows]
+
+
+# === Face Snapshots (Photo Memory) ===
+
+def save_snapshot(
+    photo_path: str,
+    emotion: str | None = None,
+    distance_cm: float | None = None,
+    user_name: str | None = None,
+    notes: str | None = None,
+) -> int:
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO face_snapshots "
+            "(ts, photo_path, emotion, distance_cm, user_name, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (time.time(), photo_path, emotion, distance_cm, user_name, notes),
+        )
+        return cur.lastrowid or -1
+
+
+def recent_snapshots(days: float = 7.0, limit: int = 50) -> list[dict]:
+    """최근 N일치 스냅샷 메타데이터 — agent 회상용."""
+    cutoff = time.time() - days * 86400
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT ts, photo_path, emotion, distance_cm, user_name, notes "
+            "FROM face_snapshots WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (cutoff, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def snapshot_summary(hours_back: float = 24.0) -> dict[str, int]:
+    """N시간 동안 emotion별 count — agent context용 간단 요약."""
+    cutoff = time.time() - hours_back * 3600
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT emotion, COUNT(*) AS c FROM face_snapshots "
+            "WHERE ts >= ? GROUP BY emotion",
+            (cutoff,),
+        ).fetchall()
+        return {(r["emotion"] or "unknown"): r["c"] for r in rows}
+
+
+def purge_old_snapshots(keep_days: float = 7.0) -> list[str]:
+    """오래된 스냅샷 DB 행 + 파일 경로 리스트 반환 (파일 삭제는 caller)."""
+    cutoff = time.time() - keep_days * 86400
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT photo_path FROM face_snapshots WHERE ts < ?",
+            (cutoff,),
+        ).fetchall()
+        paths = [r["photo_path"] for r in rows]
+        conn.execute("DELETE FROM face_snapshots WHERE ts < ?", (cutoff,))
+        return paths

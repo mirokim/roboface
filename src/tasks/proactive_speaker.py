@@ -25,6 +25,7 @@ log = get_logger("proactive")
 # 트리거 종류별 표정 매핑
 _TRIGGER_EXPR = {
     "greeting": HAPPY,
+    "work_break_gentle": NEUTRAL,
     "work_break_warn": NEUTRAL,
     "work_break_strong": WORRIED,
     "work_break_alarm": WORRIED,

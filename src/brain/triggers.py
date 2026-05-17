@@ -61,32 +61,69 @@ def _proactive_allowed(ctx: StateContext) -> bool:
 
 # === 개별 트리거 ===
 
+_WORK_BREAK_GENTLE_POOL = (
+    "벌써 {m}분 됐네. 잠깐 일어나서 기지개 한 번.",
+    "{m}분 앉아있었어. 어깨 한 번 펴봐.",
+    "{m}분이야. 물 한 잔 어때?",
+    "잠깐, {m}분 됐어. 눈 좀 멀리 봐줘.",
+)
+
+_WORK_BREAK_WARN_POOL = (
+    "{m}분이야. 진짜 잠깐 일어나서 걸어볼까?",
+    "벌써 {m}분이나 앉아있었네. 5분만 쉬자.",
+    "{m}분째 같은 자세야. 스트레칭 한 번 어때?",
+    "{m}분 됐어. 허리 펴고 한숨 돌려.",
+)
+
+_WORK_BREAK_STRONG_POOL = (
+    "{h}시간 넘게 앉아있어. 진짜 일어나야 해.",
+    "{h}시간이나 됐어. 잠깐만 일어나줘.",
+    "{m}분이야... 자세 무너졌을걸. 한 번 풀어줘.",
+    "{h}시간 동안 같은 자세. 몸이 비명 지를 거야.",
+)
+
+_WORK_BREAK_ALARM_POOL = (
+    "{m}분 동안 쉬지 않았어. 진짜 잠깐만 일어나줘.",
+    "{h}시간 넘었어. 이건 진짜 무리야.",
+    "허리/목 망가져. 5분만이라도 쉬자, 부탁이야.",
+)
+
+
+def _format_work_msg(pool: tuple[str, ...], minutes: int) -> str:
+    msg = random.choice(pool)
+    return msg.format(m=minutes, h=max(1, minutes // 60))
+
+
 def check_work_break(
     ctx: StateContext, current_session_id: int | None,
 ) -> Optional[ProactiveTrigger]:
-    """장시간 작업 시 휴식 권유."""
+    """장시간 작업 시 휴식 권유 — 4단계 (gentle/warn/strong/alarm)."""
     if current_session_id is None:
         return None
-    duration_min = memory.current_work_duration(current_session_id) / 60
+    duration_min = int(memory.current_work_duration(current_session_id) / 60)
     if duration_min >= BEHAVIOR.work_break_alarm_minutes:
         return ProactiveTrigger(
-            kind="work_break_alarm",
-            priority=9,
-            context={"work_minutes": int(duration_min)},
-            suggested_message=f"{int(duration_min)}분 동안 쉬지 않으셨어요. 진짜 잠깐만 일어나주세요.",
+            kind="work_break_alarm", priority=9,
+            context={"work_minutes": duration_min},
+            suggested_message=_format_work_msg(_WORK_BREAK_ALARM_POOL, duration_min),
         )
     if duration_min >= BEHAVIOR.work_break_strong_minutes:
         return ProactiveTrigger(
-            kind="work_break_strong",
-            priority=7,
-            context={"work_minutes": int(duration_min)},
-            suggested_message=f"벌써 {int(duration_min // 60)}시간이나 앉아 계셨네요. 잠깐 스트레칭은 어떠세요?",
+            kind="work_break_strong", priority=7,
+            context={"work_minutes": duration_min},
+            suggested_message=_format_work_msg(_WORK_BREAK_STRONG_POOL, duration_min),
         )
     if duration_min >= BEHAVIOR.work_break_warn_minutes:
         return ProactiveTrigger(
-            kind="work_break_warn",
-            priority=4,
-            context={"work_minutes": int(duration_min)},
+            kind="work_break_warn", priority=4,
+            context={"work_minutes": duration_min},
+            suggested_message=_format_work_msg(_WORK_BREAK_WARN_POOL, duration_min),
+        )
+    if duration_min >= BEHAVIOR.work_break_gentle_minutes:
+        return ProactiveTrigger(
+            kind="work_break_gentle", priority=2,
+            context={"work_minutes": duration_min},
+            suggested_message=_format_work_msg(_WORK_BREAK_GENTLE_POOL, duration_min),
         )
     return None
 
