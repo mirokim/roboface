@@ -17,6 +17,7 @@ import time
 from src.audio.fake_tts import speak as fake_speak
 from src.audio.mic import Microphone, MicCaptureError
 from src.brain import memory
+from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import AUDIO_INPUT_DEVICE, is_robot
@@ -108,6 +109,14 @@ async def run_robot() -> None:
                 servos=servos, perception=perception,
             ),
             name="proactive",
+        ),
+        # Claude tool-use 자율 에이전트 — 15초마다 결정 (API 키 있을 때만)
+        asyncio.create_task(
+            RobotAgent(
+                face, ctx, perception, servos=servos,
+                get_session_id=lambda: work_tracker.current_session_id,
+            ).run(),
+            name="agent",
         ),
         # AI Camera person detection + perception + 표정 거울 + 얼굴 인식
         asyncio.create_task(

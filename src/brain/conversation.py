@@ -83,6 +83,45 @@ class _ClaudeClient:
             log.warning(f"Claude 호출 실패: {e}")
             return ""
 
+    def generate_with_tools(
+        self,
+        user_prompt: str,
+        tools: list[dict],
+        *,
+        model: str = CLAUDE_MODEL,
+        max_tokens: int = 300,
+        system: str = SYSTEM_PROMPT,
+    ) -> list[dict]:
+        """tool use 모드 호출. 결과: [{"name": ..., "input": {...}}, ...]"""
+        client = self._ensure()
+        if client is None:
+            return []
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                tools=tools,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            actions: list[dict] = []
+            for block in response.content:
+                if getattr(block, "type", None) == "tool_use":
+                    actions.append({
+                        "name": block.name,
+                        "input": block.input,
+                    })
+            return actions
+        except Exception as e:
+            log.warning(f"Claude tool 호출 실패: {e}")
+            return []
+
 
 _client = _ClaudeClient()
 
