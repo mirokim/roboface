@@ -73,6 +73,16 @@ class WristWaveDetector:
         self.shoulder_width_history: deque[float] = deque(maxlen=self.history_max)
         self.last_wave_at = 0.0
         self._last_debug_log_at = 0.0
+        # 진단용 — 마지막 프레임 손목 raw 정보
+        self.last_l_wrist_conf: float = 0.0
+        self.last_r_wrist_conf: float = 0.0
+        self.last_l_wrist_y: float = -1.0
+        self.last_r_wrist_y: float = -1.0
+        self.last_shoulder_y: float = -1.0
+        # reject 사유 카운트 (diag period 동안 누적)
+        self.reject_low_conf: int = 0
+        self.reject_below_legs: int = 0
+        self.frames_seen: int = 0
 
     def reset(self) -> None:
         self.left_history.clear()
@@ -80,7 +90,10 @@ class WristWaveDetector:
         self.shoulder_width_history.clear()
 
     def diag(self) -> dict:
-        """현재 진행 상황 — vision_task가 5초마다 로그로 출력."""
+        """현재 진행 상황 — vision_task가 5초마다 로그로 출력.
+
+        호출 시 reject 카운트는 reset (period 단위 누적).
+        """
         np = _get_numpy()
         l_amp = r_amp = -1.0
         if np is not None and len(self.left_history) >= self.min_eval_frames:
@@ -94,7 +107,7 @@ class WristWaveDetector:
             sw_med = float(np.median(np.fromiter(
                 self.shoulder_width_history, dtype=np.float32,
             )))
-        return {
+        out = {
             "left": len(self.left_history),
             "right": len(self.right_history),
             "need": self.min_eval_frames,
@@ -105,7 +118,21 @@ class WristWaveDetector:
             "cooldown_remain": max(
                 0.0, self.cooldown_sec - (time.time() - self.last_wave_at),
             ),
+            # 마지막 프레임 raw — keypoint 자체가 안 잡히는 건지 파악용
+            "wrist_conf_l": self.last_l_wrist_conf,
+            "wrist_conf_r": self.last_r_wrist_conf,
+            "wrist_y_l": self.last_l_wrist_y,
+            "wrist_y_r": self.last_r_wrist_y,
+            "shoulder_y": self.last_shoulder_y,
+            # 직전 diag 호출 이후 reject 사유 누적
+            "frames": self.frames_seen,
+            "rej_low_conf": self.reject_low_conf,
+            "rej_below_legs": self.reject_below_legs,
         }
+        self.reject_low_conf = 0
+        self.reject_below_legs = 0
+        self.frames_seen = 0
+        return out
 
     def process(self, keypoints: Any) -> bool:
         """keypoints: shape (17, 3) — (x, y, conf), 0~1 정규화. 감지되면 True."""
@@ -144,6 +171,12 @@ class WristWaveDetector:
                 f"hist L={len(self.left_history)} R={len(self.right_history)}"
             )
 
+        # 진단 — 매 프레임 손목 raw 저장 (diag()에서 노출)
+        self.last_l_wrist_conf = float(l_wrist[2])
+        self.last_r_wrist_conf = float(r_wrist[2])
+        self.last_l_wrist_y = float(l_wrist[1])
+        self.last_r_wrist_y = float(r_wrist[1])
+
         if not shoulder_ok:
             return False
 
@@ -151,8 +184,10 @@ class WristWaveDetector:
         if shoulder_width < 0.02:   # 너무 좁음 — 옆모습이거나 노이즈
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
+        self.last_shoulder_y = shoulder_y
         # 다리 모션 오인 방지. 어깨~가슴 정도까지 (정규화 0.4 = 화면 40%)는 wave 허용.
         max_below = 0.4
+        self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 다리 높이는 아닐 때
         pushed_any = False
@@ -161,8 +196,10 @@ class WristWaveDetector:
             (r_wrist, self.right_history),
         ):
             if wrist[2] < self.KP_CONF_THRESHOLD:
+                self.reject_low_conf += 1
                 continue
             if wrist[1] > shoulder_y + max_below:   # 다리 높이 — 무시
+                self.reject_below_legs += 1
                 continue
             history.append(float(wrist[0]))
             pushed_any = True

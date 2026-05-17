@@ -129,11 +129,24 @@ async def run_vision(
                     # wave diag (WristWaveDetector만)
                     if isinstance(wave_detector, WristWaveDetector):
                         d = wave_detector.diag()
+                        # 손목 키포인트가 안 잡히면 history도 안 쌓임 — raw 같이 출력
                         parts.append(
                             f"wave=L{d['left']}/R{d['right']}"
                             f"(amp L{d['l_amp_ratio']:.2f}/R{d['r_amp_ratio']:.2f}"
                             f" need≥{d['need_amp']})"
                         )
+                        parts.append(
+                            f"wrist:L_conf={d['wrist_conf_l']:.2f}"
+                            f"(y{d['wrist_y_l']:.2f}) "
+                            f"R_conf={d['wrist_conf_r']:.2f}(y{d['wrist_y_r']:.2f}) "
+                            f"sh_y={d['shoulder_y']:.2f}"
+                        )
+                        if d["frames"] > 0:
+                            parts.append(
+                                f"rej(f={d['frames']}): "
+                                f"low_conf={d['rej_low_conf']} "
+                                f"below_legs={d['rej_below_legs']}"
+                            )
                     if hands_up_detector is not None:
                         d = hands_up_detector.diag()
                         parts.append(f"hands_up={d['consecutive']}/{d['need']}")
