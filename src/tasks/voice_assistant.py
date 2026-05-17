@@ -207,11 +207,21 @@ class VoiceAssistant:
             self.ctx.transition(prev_state, self.face)
             return
 
-        # 대화 기록 — in-memory history + DB log
-        self.history.append({"role": "user", "content": text})
-        self.history = self.history[-_HISTORY_MAX_TURNS:]
+        # DB에서 이전 대화 맥락 복원 — 재시작 후에도 유지
+        from src.brain import memory
         try:
-            from src.brain import memory
+            db_recent = memory.recent_conversation(minutes=60.0, limit=20)
+            persistent = [
+                {"role": "assistant" if r["speaker"] == "robot" else "user",
+                 "content": r["text"]}
+                for r in db_recent
+                if r["kind"] in ("voice", "voice_reply")
+            ]
+            self.history = persistent[-_HISTORY_MAX_TURNS:]
+        except Exception as e:
+            log.debug(f"history 복원 실패: {e}")
+        # 이번 user 발화 로그 (history에는 이미 포함 안 됨)
+        try:
             memory.log_user(text, kind="voice")
         except Exception as e:
             log.debug(f"conv log 실패: {e}")
