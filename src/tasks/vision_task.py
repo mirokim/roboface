@@ -18,7 +18,7 @@ from src.utils.logger import get_logger
 from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
-from src.vision import photo_memory
+from src.vision import debug_snapshot, photo_memory
 from src.vision.pose_gestures import (
     GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
     face_orientation,
@@ -191,6 +191,41 @@ async def run_vision(
                             f"(f={d['facing_ratio']:.2f})"
                         )
                     log.info("vision diag: " + " ".join(parts))
+
+                # 디버그 스냅샷 요청 처리 — 매 프레임 체크 (값싼 작업)
+                if debug_snapshot.pending():
+                    info = debug_snapshot.clear_pending()
+                    try:
+                        frame_now = cam.get_main_frame()
+                        diag_text = [
+                            f"score={person_score_str.split('=')[-1]} "
+                            f"orient={last_orientation}",
+                        ]
+                        if pose_stab is not None:
+                            avg = (
+                                sum(pose_stab._score_history)
+                                / max(1, len(pose_stab._score_history))
+                            )
+                            diag_text.append(
+                                f"lock={pose_stab.is_locked} avg={avg:.3f}",
+                            )
+                        if isinstance(wave_detector, WristWaveDetector):
+                            dd = wave_detector.diag()
+                            diag_text.append(
+                                f"wrist L_conf={dd['wrist_conf_l']:.2f} "
+                                f"R_conf={dd['wrist_conf_r']:.2f}",
+                            )
+                            diag_text.append(
+                                f"wave L{dd['left']}/R{dd['right']} "
+                                f"amp L{dd['l_amp_ratio']:.2f}/R{dd['r_amp_ratio']:.2f}",
+                            )
+                        if info:
+                            diag_text.append(f"note: {info}")
+                        debug_snapshot.save_debug_snapshot(
+                            frame_now, detections, diag_text,
+                        )
+                    except Exception as e:
+                        log.warning(f"debug snapshot 실패: {e}")
                 if person_dets:
                     biggest = max(
                         person_dets,

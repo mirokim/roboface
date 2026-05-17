@@ -34,6 +34,7 @@ from src.motion import poses
 from src.motion.servos import ServoController
 from src.sensors.base import SensorEvent, SensorEventType
 from src.utils.logger import get_logger
+from src.vision import debug_snapshot
 
 log = get_logger("command_executor")
 
@@ -146,6 +147,12 @@ async def _execute(
             raise RuntimeError("emit_event 콜백 미주입 (main에서 등록 필요)")
         emit_event(SensorEvent(type=ev_type, data={"source": "cli"}))
         return f"gesture: {kind} → {ev_type.value}"
+
+    if cmd == "snapshot":
+        # vision_task가 다음 프레임에서 처리 — bbox/keypoint 어노테이트 후 저장
+        note = args.get("note", "")
+        debug_snapshot.request_snapshot(note)
+        return f"snapshot requested → {debug_snapshot.DEBUG_SNAPSHOT_PATH}"
 
     raise ValueError(f"알 수 없는 명령: {cmd}")
 

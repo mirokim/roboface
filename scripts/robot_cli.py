@@ -98,6 +98,12 @@ def main() -> int:
     sub.add_parser("status", help="현재 상태 조회 (--wait 자동)")
     sub.add_parser("expressions", help="사용 가능한 표정 이름 목록")
 
+    ss = sub.add_parser(
+        "snapshot",
+        help="카메라 프레임에 bbox+keypoints 그려서 /tmp/roboface_debug.jpg 저장",
+    )
+    ss.add_argument("--note", default="", help="이미지에 표시할 메모")
+
     args = p.parse_args()
 
     if args.cmd == "expressions":
@@ -125,6 +131,8 @@ def main() -> int:
         return _enqueue_and_report("gesture", {"kind": args.kind}, wait)
     if args.cmd == "blink":
         return _enqueue_and_report("blink", {}, wait)
+    if args.cmd == "snapshot":
+        return _enqueue_and_report("snapshot", {"note": args.note}, wait)
     if args.cmd == "status":
         return _enqueue_and_report("status", {}, wait)
 
