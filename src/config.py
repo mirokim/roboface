@@ -56,8 +56,8 @@ I2C_BUS = 1
 PCA9685_ADDRESS = 0x40
 
 # === 서보 (PCA9685 채널) ===
-SERVO_PAN_CHANNEL = 0
-SERVO_TILT_CHANNEL = 4   # 채널 1 죽어 4번으로 변경
+SERVO_PAN_CHANNEL = 1    # 좌우 회전
+SERVO_TILT_CHANNEL = 4   # 상하 회전 (채널 1은 PAN 점유, TILT는 4번)
 
 # SG92R 270° 사양
 SERVO_PULSE_MIN_US = 500
