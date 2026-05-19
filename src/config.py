@@ -64,13 +64,14 @@ SERVO_PULSE_MIN_US = 500
 SERVO_PULSE_MAX_US = 2500
 SERVO_RANGE_DEG = 270
 
-# 가동 범위 (소프트웨어 리밋)
-PAN_MIN_DEG = 45     # 좌
-PAN_CENTER_DEG = 135 # 정면
-PAN_MAX_DEG = 225    # 우
-TILT_MIN_DEG = 50    # 위
+# 가동 범위 (소프트웨어 리밋) — SG90 180° 안에서 안전 마진 두고
+# 절대 0/180에 가까이 못 가게 (stall 방지)
+PAN_MIN_DEG = 30     # 좌
+PAN_CENTER_DEG = 90  # 정면
+PAN_MAX_DEG = 150    # 우
+TILT_MIN_DEG = 70    # 위
 TILT_CENTER_DEG = 90
-TILT_MAX_DEG = 130   # 아래 (5~85° 범위 안에서)
+TILT_MAX_DEG = 110   # 아래
 
 # === 센서 핀 ===
 DHT22_GPIO = 22

@@ -101,7 +101,11 @@ class MockServoController(ServoController):
 
 
 class PCA9685ServoController(ServoController):
-    """실제 PCA9685 + SG92R 270° 서보 제어."""
+    """실제 PCA9685 + SG90 180° 서보 제어 + stall 보호."""
+
+    # stall 보호 — 같은 각도로 머문 지 STALL_TIMEOUT_SEC 지나면 신호 끔.
+    # 서보가 위치 유지 위해 미세 전류 흘리는데, 못 가는 위치면 큰 전류 지속 → 발열.
+    STALL_TIMEOUT_SEC = 0.8
 
     def __init__(self) -> None:
         super().__init__()
@@ -114,16 +118,35 @@ class PCA9685ServoController(ServoController):
                 SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US,
             )
             self.kit.servo[ch].actuation_range = SERVO_RANGE_DEG
+        self._last_change_at = time.monotonic()
+        self._signal_active = True
         self.home()
         log.info("PCA9685 서보 초기화 완료")
 
     def set_angles(self, pan: float, tilt: float) -> None:
         pan = _clamp(pan, PAN_MIN_DEG, PAN_MAX_DEG)
         tilt = _clamp(tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+        # 명령 보낼 때만 신호 재활성 + 시간 갱신
+        moved = (
+            abs(pan - self.position.pan) > 0.5
+            or abs(tilt - self.position.tilt) > 0.5
+            or not self._signal_active
+        )
         self.kit.servo[SERVO_PAN_CHANNEL].angle = pan
         self.kit.servo[SERVO_TILT_CHANNEL].angle = tilt
         self.position.pan = pan
         self.position.tilt = tilt
+        if moved:
+            self._last_change_at = time.monotonic()
+            self._signal_active = True
+        # 멈춰있은지 STALL_TIMEOUT 지났으면 신호 풀어줘 발열 방지
+        elif (time.monotonic() - self._last_change_at) > self.STALL_TIMEOUT_SEC:
+            try:
+                self.kit.servo[SERVO_PAN_CHANNEL].angle = None
+                self.kit.servo[SERVO_TILT_CHANNEL].angle = None
+                self._signal_active = False
+            except Exception:
+                pass
 
 
 def create_controller() -> ServoController:
