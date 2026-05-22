@@ -163,7 +163,8 @@ class BehaviorConfig:
     history_voice_turns: int = 6              # voice_assistant 컨텍스트 턴 수
 
     # 발화 표시
-    min_speech_display_sec: float = 3.0       # 말풍선 최소 노출
+    min_speech_display_sec: float = 5.0       # 말풍선 최소 노출 (짧은 멘트도 5초)
+    speech_extra_hold_sec: float = 1.5        # 음성 끝나고 추가 노출
 
     # 입 모양 → 음량 (단일 SSOT — mouth.py + tts.py 공통)
     # 정규화된 0~1 진폭 기준. (small, mid, large) 임계값 이상이면 다음 단계.
