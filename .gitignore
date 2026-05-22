@@ -26,8 +26,13 @@ env/
 # Data / logs
 src/data/*.db
 src/data/*.json
+src/data/models/
+src/data/face_snapshots/
 logs/
 *.log
+
+# ML models (다운로드해서 사용)
+*.task
 
 # OS
 Thumbs.db
