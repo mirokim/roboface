@@ -47,10 +47,10 @@ OUTPUT_DEADZONE_DEG = 0.15
 PAN_INVERT = True
 TILT_INVERT = True
 
-# === Breathing — 보일 듯 말 듯 살아있는 느낌만 ===
-BREATH_TILT_AMP_DEG = 0.4
+# === Breathing — 자연 호흡은 위아래만. PAN은 0으로 (갸우뚱 거슬림). ===
+BREATH_TILT_AMP_DEG = 0.5
 BREATH_TILT_PERIOD_SEC = 5.0
-BREATH_PAN_AMP_DEG = 0.2
+BREATH_PAN_AMP_DEG = 0.0    # 좌우 호흡 거슬리니까 끔
 BREATH_PAN_PERIOD_SEC = 7.0
 
 
