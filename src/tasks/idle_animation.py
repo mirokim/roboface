@@ -9,7 +9,7 @@ import asyncio
 import random
 
 from src.brain.perception import PerceptionState
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import BEHAVIOR
 from src.face.renderer import FaceState
 from src.motion import poses
@@ -109,10 +109,8 @@ async def run_ambient_motion(
                 tilt_amp_deg=random.uniform(1.0, 2.5),
             )
 
-        ctx.ambient_motion_active = True
-        try:
-            await poses.sway(servos, **params)
-        except Exception as e:
-            log.warning(f"sway 에러: {e}")
-        finally:
-            ctx.ambient_motion_active = False
+        async with motion_busy_scope(ctx):
+            try:
+                await poses.sway(servos, **params)
+            except Exception as e:
+                log.warning(f"sway 에러: {e}")

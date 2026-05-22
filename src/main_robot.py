@@ -17,7 +17,7 @@ from src.audio.mic import Microphone, MicCaptureError
 from src.brain import conversation_templates, memory, stats as robot_stats
 from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import AUDIO_INPUT_DEVICE, is_robot
 from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
@@ -358,7 +358,8 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     await asyncio.sleep(0)
     try:
         if servos is not None:
-            await poses.dance(servos, face, bpm=110, beats=4)
+            async with motion_busy_scope(ctx):
+                await poses.dance(servos, face, bpm=110, beats=4)
         else:
             await asyncio.sleep(1.5)
         try:
@@ -404,7 +405,8 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     await asyncio.sleep(0)  # bubble 즉시 노출
     try:
         if servos is not None:
-            await poses.dance(servos, face, bpm=100, beats=4)
+            async with motion_busy_scope(ctx):
+                await poses.dance(servos, face, bpm=100, beats=4)
         else:
             await asyncio.sleep(1.5)
         try:

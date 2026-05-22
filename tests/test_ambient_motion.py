@@ -36,11 +36,11 @@ def test_sway_returns_to_center():
     assert abs(servos.position.tilt - TILT_CENTER_DEG) < 1.0
 
 
-def test_state_context_has_ambient_flag():
+def test_state_context_has_motion_busy_flag():
     ctx = StateContext()
-    assert ctx.ambient_motion_active is False
-    ctx.ambient_motion_active = True
-    assert ctx.ambient_motion_active is True
+    assert ctx.motion_busy is False
+    ctx.motion_busy = True
+    assert ctx.motion_busy is True
 
 
 def test_ambient_motion_skips_blocked_states(monkeypatch):
@@ -82,8 +82,8 @@ def test_ambient_motion_runs_in_idle(monkeypatch):
 
     async def fake_sway(servos, **kwargs):
         calls.append(kwargs)
-        # ambient_motion_active 플래그가 set돼있어야 함
-        assert ctx.ambient_motion_active is True
+        # sway 실행 중 motion_busy 플래그가 set돼있어야 함
+        assert ctx.motion_busy is True
 
     monkeypatch.setattr(idle_animation.poses, "sway", fake_sway)
     monkeypatch.setattr(idle_animation, "_AMBIENT_MIN_INTERVAL_SEC", 0.0)
@@ -107,7 +107,7 @@ def test_ambient_motion_runs_in_idle(monkeypatch):
     # idle + no user → "free" 파라미터 (bpm 45~80)
     assert all(45 <= c["bpm"] <= 80 for c in calls)
     # 끝나면 플래그 해제됨
-    assert ctx.ambient_motion_active is False
+    assert ctx.motion_busy is False
 
 
 def test_ambient_motion_short_when_user_present(monkeypatch):
@@ -144,9 +144,9 @@ def test_ambient_motion_short_when_user_present(monkeypatch):
         assert c["pan_amp_deg"] <= 8.0
 
 
-def test_head_tracker_yields_to_ambient_motion():
-    """head_tracker가 ctx.ambient_motion_active를 보고 양보하는지."""
+def test_head_tracker_yields_to_motion_busy():
+    """head_tracker가 ctx.motion_busy를 보고 양보하는지."""
     import inspect
     from src.tasks import head_tracker
     src = inspect.getsource(head_tracker.run_head_tracker)
-    assert "ambient_motion_active" in src
+    assert "motion_busy" in src

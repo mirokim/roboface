@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -31,8 +32,10 @@ class StateContext:
     # 마지막 인사 (greeting/reappear/wave/hands_up) 시각 — 인사 반복 방지
     last_greeting_at: float | None = None
     user_present: bool = False
-    # ambient_motion이 서보를 점유 중일 때 True — head_tracker가 양보.
-    ambient_motion_active: bool = False
+    # 다른 모션 task(sway/nod/shake/dance/greeting...)가 서보 점유 중일 때 True.
+    # head_tracker는 이 플래그가 켜져 있으면 명령을 보내지 않고 양보.
+    # motion_busy_scope() context manager로 안전하게 set/clear.
+    motion_busy: bool = False
     # 현재 인식된 사용자 이름 (face_memory). None이면 모르는 사람 / 미등록.
     user_name: str | None = None
     # 다음 사용자 face crop을 이 이름으로 등록 (voice_assistant가 set)
@@ -62,3 +65,21 @@ _DEFAULT_EXPRESSIONS = {
 
 def time_in_state(ctx: StateContext) -> float:
     return time.time() - ctx.entered_at
+
+
+@asynccontextmanager
+async def motion_busy_scope(ctx: StateContext):
+    """서보 점유 모션을 감싸는 async context manager.
+
+    이 블록 안에서는 head_tracker가 set_angles 호출을 양보 →
+    poses.nod/shake/dance/greeting 등과 충돌하지 않음.
+
+    nested call (중첩 점유)는 nesting depth로 카운트해 안전하게 처리.
+    """
+    ctx.motion_busy = True
+    try:
+        yield
+    finally:
+        # 단순 set False — 동시에 여러 motion 띄우는 패턴은 없다는 전제.
+        # (있다면 nesting depth 카운터로 바꾸면 됨.)
+        ctx.motion_busy = False

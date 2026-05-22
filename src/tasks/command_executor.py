@@ -25,7 +25,7 @@ from collections.abc import Callable
 
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import memory
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import BEHAVIOR
 from src.face import expressions as expr
 from src.face.eyes import trigger_blink
@@ -99,7 +99,12 @@ async def _execute(
             raise RuntimeError("서보 없음")
         beats = int(args.get("beats", 4))
         bpm = int(args.get("bpm", 120))
-        asyncio.create_task(poses.dance(servos, face, bpm=bpm, beats=beats))
+
+        async def _do_dance():
+            async with motion_busy_scope(ctx):
+                await poses.dance(servos, face, bpm=bpm, beats=beats)
+
+        asyncio.create_task(_do_dance())
         return f"dance: {beats}@{bpm}bpm"
 
     if cmd == "pose":
@@ -109,7 +114,12 @@ async def _execute(
         fn = _POSE_MAP.get(kind)
         if fn is None:
             raise ValueError(f"알 수 없는 pose: {kind}. 가능: {list(_POSE_MAP)}")
-        asyncio.create_task(fn(servos))
+
+        async def _do_pose():
+            async with motion_busy_scope(ctx):
+                await fn(servos)
+
+        asyncio.create_task(_do_pose())
         return f"pose: {kind}"
 
     if cmd == "transition":

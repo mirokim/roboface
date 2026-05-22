@@ -22,7 +22,7 @@ from datetime import datetime
 
 from src.brain import conversation, memory
 from src.brain.perception import PerceptionState
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
 from src.config import ANTHROPIC_API_KEY, BEHAVIOR
@@ -319,6 +319,7 @@ class RobotAgent:
         log.info(f"🤖 [agent] dance ({beats} beats @ {bpm} BPM)")
         from src.motion import poses
         try:
-            await poses.dance(self.servos, self.face, bpm=bpm, beats=beats)
+            async with motion_busy_scope(self.ctx):
+                await poses.dance(self.servos, self.face, bpm=bpm, beats=beats)
         except Exception as e:
             log.warning(f"agent dance 에러: {e}")

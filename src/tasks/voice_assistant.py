@@ -20,7 +20,7 @@ from src.audio.stt import OpenAIWhisperSTT, STTError
 from src.audio.tts import OpenAITTS, TTSError, speak as tts_speak
 from src.audio.wake_word import PorcupineWakeWord, WakeWordError, wait_for_wake
 from src.brain import conversation
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import (
     AUDIO_INPUT_DEVICE,
     PORCUPINE_KEYWORD,
@@ -281,7 +281,8 @@ class VoiceAssistant:
             self.ctx.transition(State.TALKING, self.face)
             self.face.apply_expression(HAPPY)
             if self.servos is not None:
-                await poses.dance(self.servos, self.face, bpm=120, beats=8)
+                async with motion_busy_scope(self.ctx):
+                    await poses.dance(self.servos, self.face, bpm=120, beats=8)
             else:
                 # 서보 없으면 표정/입만 사이클
                 from src.motion.poses import dance  # type: ignore[unused-import]

@@ -12,7 +12,7 @@ import time
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import conversation, memory
 from src.brain.perception import PerceptionState
-from src.brain.state_machine import State, StateContext
+from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.triggers import ProactiveTrigger, evaluate_all, expression_for
 from src.config import BEHAVIOR
 from src.face.renderer import FaceState
@@ -37,7 +37,12 @@ async def fire_trigger(
     if trig.kind.startswith("work_break"):
         ctx.transition(State.ALERTING, face)
 
-    # 머리 동작 (트리거별 — 발화와 병렬로)
+    # 머리 동작 (트리거별 — 발화와 병렬로).
+    # head_tracker와 충돌 방지 위해 motion_busy_scope 으로 감싸 background task로.
+    async def _wrap(coro):
+        async with motion_busy_scope(ctx):
+            await coro
+
     motion_task: asyncio.Task | None = None
     if servos is not None:
         if trig.kind == "greeting":
@@ -45,12 +50,14 @@ async def fire_trigger(
             # 가끔 (25%) 짧은 댄스로 인사 — 그 외엔 일반 끄덕 인사
             if random.random() < 0.25:
                 motion_task = asyncio.create_task(
-                    poses.dance(servos, face, bpm=130, beats=4)
+                    _wrap(poses.dance(servos, face, bpm=130, beats=4))
                 )
             else:
-                motion_task = asyncio.create_task(poses.greeting(servos))
+                motion_task = asyncio.create_task(_wrap(poses.greeting(servos)))
         elif trig.kind.startswith("work_break"):
-            motion_task = asyncio.create_task(poses.shake(servos, times=1))
+            motion_task = asyncio.create_task(
+                _wrap(poses.shake(servos, times=1))
+            )
 
     # 멘트 결정
     if trig.suggested_message:
