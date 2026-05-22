@@ -39,8 +39,9 @@ class PoseStabilizer:
     def __init__(
         self,
         smoothing_frames: int = 3,
-        lock_window_sec: float = 1.0,
-        lock_min_score: float = 0.05,   # HigherHRNet score 분포가 낮아 너그럽게
+        # 1.5s 윈도우로 lock 더 안정적 — 1프레임 깜빡임에 풀리지 않게
+        lock_window_sec: float = 1.5,
+        lock_min_score: float = 0.04,   # 더 너그럽게
         fps: float = 10.0,
     ) -> None:
         self.smoothing_frames = max(1, smoothing_frames)

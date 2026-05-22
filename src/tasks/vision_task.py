@@ -50,9 +50,12 @@ async def run_vision(
         return
 
     detector = PersonDetector(
-        min_confidence=0.1 if VISION_MODE == "pose" else 0.5,
-        # pose 모드는 score가 자주 깜빡거려 5초로는 LEFT 토글 잦음 → 15초로 완화
-        away_timeout_sec=15.0 if VISION_MODE == "pose" else 5.0,
+        # pose 모드 score 분포가 매우 낮음 (0.1~0.3) — 더 너그럽게 0.05
+        min_confidence=0.05 if VISION_MODE == "pose" else 0.5,
+        # pose 모드는 score 깜빡임으로 LEFT 토글 잦음 → 20초로 완화
+        away_timeout_sec=20.0 if VISION_MODE == "pose" else 5.0,
+        # 신속 인지 — 2프레임이면 PRESENT 확정 (10fps에서 200ms)
+        confirm_frames=2 if VISION_MODE == "pose" else 3,
     )
     fps = getattr(cam, "target_fps", 10.0)
     wave_detector: WaveDetector | WristWaveDetector
@@ -93,8 +96,8 @@ async def run_vision(
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
     try:
-        # pose 모드 점수는 매우 낮은 경우 많음 (HigherHRNet 특성)
-        person_filter_conf = 0.1 if VISION_MODE == "pose" else 0.5
+        # pose 모드 점수는 매우 낮은 경우 많음 (HigherHRNet 특성). 너그럽게 0.05.
+        person_filter_conf = 0.05 if VISION_MODE == "pose" else 0.5
 
         async for detections in cam.stream():
             events = detector.process(detections)
@@ -352,7 +355,7 @@ async def run_vision(
                 last_person_at = now_t
                 effective_bbox = person_bbox
                 person_confirmed_this_frame = True
-            elif last_person_bbox is not None and now_t - last_person_at < 1.5:
+            elif last_person_bbox is not None and now_t - last_person_at < 2.5:
                 effective_bbox = last_person_bbox
                 person_confirmed_this_frame = False
             else:
