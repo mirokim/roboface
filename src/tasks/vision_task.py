@@ -308,7 +308,7 @@ async def run_vision(
                                 pass
                             behavior_speaker.say(
                                 face, ctx,
-                                behavior_speaker.closer_message(),
+                                behavior_speaker.closer_message(ctx),
                                 kind="distance_closer",
                                 cooldown_sec=180.0,
                             )
@@ -324,7 +324,7 @@ async def run_vision(
                                 pass
                             behavior_speaker.say(
                                 face, ctx,
-                                behavior_speaker.farther_message(),
+                                behavior_speaker.farther_message(ctx),
                                 kind="distance_farther",
                                 cooldown_sec=180.0,
                             )

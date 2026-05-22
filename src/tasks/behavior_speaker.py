@@ -32,7 +32,12 @@ def _busy_state(ctx: StateContext) -> bool:
     return ctx.state in (State.TALKING, State.LISTENING, State.GREETING)
 
 
-_GREETING_KINDS = {"reappear", "face_recognize"}
+# 인사류 — 5분 cooldown 공유 (greeting trigger와 공통). 손/얼굴/등장 등 모든
+# 인사 의미 이벤트는 여기서 통합 게이트.
+_GREETING_KINDS = {
+    "reappear", "face_recognize",
+    "wave_reply", "hands_up_reply",
+}
 
 
 def say(
@@ -43,34 +48,35 @@ def say(
     kind: str,
     cooldown_sec: float = DEFAULT_COOLDOWN_SEC,
     expression: Expression | None = None,
-) -> bool:
-    """행동 멘트 발화 시도. 발화하면 True.
+) -> "asyncio.Task | None":
+    """행동 멘트 발화 시도. 발화 시 speech task 반환, skip 시 None.
 
-    - text가 빈 문자열이면 skip
-    - quiet hours / busy state면 skip
-    - kind별 쿨다운
-    - 인사류(reappear/face_recognize)는 마지막 인사 후 5분 안엔 skip
+    Gates:
+    - text 빈 문자열
+    - busy state (TALKING/LISTENING/GREETING)
+    - quiet hours
+    - kind별 cooldown
+    - 인사류(_GREETING_KINDS): 마지막 인사 후 5분 안엔 skip
     """
     if not text:
-        return False
+        return None
     if _busy_state(ctx):
-        return False
+        return None
     if _is_quiet_hours():
-        return False
+        return None
     now = time.time()
-    # 인사류 전역 cooldown (greeting trigger와 공유 — 인사 중복 방지)
     if kind in _GREETING_KINDS:
         if ctx.last_greeting_at and now - ctx.last_greeting_at < 300.0:
-            return False
+            return None
     last = _LAST_AT.get(kind, 0.0)
     if now - last < cooldown_sec:
-        return False
+        return None
     _LAST_AT[kind] = now
 
     if expression is not None:
         face.apply_expression(expression)
     log.info(f"🗣️  [{kind}] {text}")
-    asyncio.create_task(fake_speak(face, text))
+    task = asyncio.create_task(fake_speak(face, text))
     ctx.last_proactive_at = now
     if kind in _GREETING_KINDS:
         ctx.last_greeting_at = now
@@ -78,13 +84,10 @@ def say(
         memory.log_robot(text, kind=kind)
     except Exception as e:
         log.debug(f"conversation log 실패: {e}")
-    return True
+    return task
 
 
 # ─── 행동별 멘트 풀 ───
-
-def _now_period() -> str:
-    return period_for()
 
 
 def _name_prefix(ctx: StateContext) -> str:
@@ -197,7 +200,7 @@ def reappear_message(absence_sec: float, ctx: StateContext) -> str:
         return msg
     # Fallback: 풀
     name_pre = _name_prefix(ctx)
-    period = _now_period()
+    period = period_for()
     if absence_sec >= 600:
         pool = REAPPEAR_LONG
     elif absence_sec >= 60:
@@ -209,25 +212,32 @@ def reappear_message(absence_sec: float, ctx: StateContext) -> str:
     return name_pre + base
 
 
-def closer_message() -> str:
-    # ctx 없이 호출됨 (vision_task에서). Claude 가능하면 시도.
-    try:
-        msg = conversation.generate_situational("got_closer")
-        if msg:
-            return msg
-    except Exception:
-        pass
+def closer_message(ctx: StateContext | None = None) -> str:
+    msg = _claude_situational("got_closer", ctx) if ctx else _claude_situational_noctx("got_closer")
+    if msg:
+        return msg
     return _pick_fresh(GOT_CLOSER)
 
 
-def farther_message() -> str:
-    try:
-        msg = conversation.generate_situational("got_farther")
-        if msg:
-            return msg
-    except Exception:
-        pass
+def farther_message(ctx: StateContext | None = None) -> str:
+    msg = _claude_situational("got_farther", ctx) if ctx else _claude_situational_noctx("got_farther")
+    if msg:
+        return msg
     return _pick_fresh(GOT_FARTHER)
+
+
+def _claude_situational_noctx(event_kind: str) -> str:
+    """ctx 없을 때도 최근 대화는 끌어다 씀."""
+    try:
+        recent = memory.recent_conversation(minutes=20.0, limit=8)
+    except Exception:
+        recent = None
+    try:
+        return conversation.generate_situational(
+            event_kind, recent_dialog=recent,
+        )
+    except Exception:
+        return ""
 
 
 def face_greeting_message(name: str) -> str:
@@ -253,7 +263,7 @@ def wave_back_message(ctx: StateContext) -> str:
     msg = _claude_situational("wave_reply", ctx)
     if msg:
         return msg
-    period = _now_period()
+    period = period_for()
     name_pre = _name_prefix(ctx)
     if random.random() < 0.5:
         pool = TIME_GREETINGS.get(period, _WAVE_SHORT)

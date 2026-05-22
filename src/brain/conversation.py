@@ -141,26 +141,15 @@ def generate_situational(
     extra: 이벤트 고유 데이터 (e.g. {"absence_sec": 120}).
     recent_dialog: 최근 대화 (memory.recent_conversation 결과 형식).
     """
+    from src.brain.time_of_day import period_ko
     from src.config import ANTHROPIC_API_KEY
     if not ANTHROPIC_API_KEY:
         return ""
 
     now = datetime.now()
-    hour = now.hour
-    if 5 <= hour < 11:
-        period = "아침"
-    elif 11 <= hour < 14:
-        period = "점심"
-    elif 14 <= hour < 18:
-        period = "오후"
-    elif 18 <= hour < 22:
-        period = "저녁"
-    else:
-        period = "심야"
-
     parts = [
         f"이벤트: {event_kind}",
-        f"시각: {now.strftime('%H:%M')} ({period})",
+        f"시각: {now.strftime('%H:%M')} ({period_ko(now)})",
     ]
     if user_name:
         parts.append(f"사용자 이름: {user_name}")
@@ -179,9 +168,8 @@ def generate_situational(
     )
     prompt = "\n".join(parts)
     text = _client.generate(prompt, max_tokens=max_tokens)
-    if text.startswith("[mock]"):
-        return ""
-    # 따옴표/마침표 정리
+    # API 키 검사는 이미 위에서 했으므로 [mock] prefix는 도달 불가.
+    # 따옴표 정리만.
     text = text.strip().strip('"').strip("'").strip()
     return text
 

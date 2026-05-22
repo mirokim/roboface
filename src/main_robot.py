@@ -13,7 +13,6 @@ import signal
 import sys
 import time
 
-from src.audio.fake_tts import speak as fake_speak
 from src.audio.mic import Microphone, MicCaptureError
 from src.brain import conversation_templates, memory
 from src.brain.agent import RobotAgent
@@ -279,26 +278,39 @@ async def _simple_reply(
     msg = await loop.run_in_executor(
         None, lambda: conversation_templates.pick(gesture_kind, ctx),
     )
-    log.info(f"🗣️  {msg}")
-    asyncio.create_task(fake_speak(face, msg))
-    memory.log_robot(msg, kind=f"gesture_{gesture_kind}")
+    # say() 단일 통로 — quiet hours / cooldown 자동 적용.
+    # gesture류는 _GREETING_KINDS 밖이라 5분 인사 cooldown 영향 X.
+    behavior_speaker.say(
+        face, ctx, msg,
+        kind=f"gesture_{gesture_kind}",
+        cooldown_sec=15.0,
+    )
 
 
 async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
-    """양손 만세 응답 — STARSTRUCK + 짧은 댄스 + 신난 멘트."""
+    """양손 만세 응답 — STARSTRUCK + 짧은 댄스 + 신난 멘트.
+
+    say() 단일 통로 — wave_back과 동일 패턴.
+    """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
     from src.face.expressions import STARSTRUCK
-    face.apply_expression(STARSTRUCK)
-    ctx.transition(State.GREETING, face)
     loop = asyncio.get_running_loop()
     msg = await loop.run_in_executor(
         None, lambda: conversation_templates.pick("hands_up", ctx),
     )
-    log.info(f"🗣️  {msg}")
-    ctx.last_greeting_at = time.time()
-    memory.log_robot(msg, kind="hands_up_reply")
-    speech_task = asyncio.create_task(fake_speak(face, msg))
+    ctx.transition(State.GREETING, face)
+    speech_task = behavior_speaker.say(
+        face, ctx, msg,
+        kind="hands_up_reply",
+        cooldown_sec=10.0,
+        expression=STARSTRUCK,
+    )
+    if speech_task is None:
+        ctx.transition(
+            State.WATCHING if ctx.user_present else State.IDLE, face,
+        )
+        return
     await asyncio.sleep(0)
     try:
         if servos is not None:
@@ -318,30 +330,39 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
 
 
 async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
-    """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스 + 인사 멘트."""
-    # 이미 다른 인터랙션 중이면 양보
+    """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스 + 인사 멘트.
+
+    behavior_speaker.say()를 단일 통로로 사용 — quiet hours / cooldown /
+    last_greeting_at 통일 적용. wave_reply가 _GREETING_KINDS에 포함돼
+    5분 인사 cooldown 적용됨.
+    """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
-    face.apply_expression(HAPPY)
-    ctx.transition(State.GREETING, face)
-    # Claude 호출이 sync고 1초 가량 — executor로 빼서 이벤트 루프 안 막게
+    # Claude로 멘트 생성 (sync — executor로)
     loop = asyncio.get_running_loop()
     greeting = await loop.run_in_executor(
         None, behavior_speaker.wave_back_message, ctx,
     )
-    log.info(f"🗣️  {greeting}")
-    ctx.last_greeting_at = time.time()
-    memory.log_robot(greeting, kind="wave_reply")
-    # fake_speak가 내부에서 face.show_speech 호출. 첫 await 대기 없이
-    # 즉시 노출되도록 task 생성 직후 한 번 yield해서 task가 실행되게 함.
-    speech_task = asyncio.create_task(fake_speak(face, greeting))
-    await asyncio.sleep(0)
+    # GREETING 상태로 전이 후 say() 호출 — 단일 통로로 발화/로그/cooldown
+    ctx.transition(State.GREETING, face)
+    speech_task = behavior_speaker.say(
+        face, ctx, greeting,
+        kind="wave_reply",
+        cooldown_sec=10.0,    # kind별 (5분은 _GREETING_KINDS가 별도 적용)
+        expression=HAPPY,
+    )
+    # say()가 게이트로 막혔으면 (quiet hours / 인사 cooldown) 그냥 상태만 복귀
+    if speech_task is None:
+        ctx.transition(
+            State.WATCHING if ctx.user_present else State.IDLE, face,
+        )
+        return
+    await asyncio.sleep(0)  # bubble 즉시 노출
     try:
         if servos is not None:
             await poses.dance(servos, face, bpm=100, beats=4)
         else:
             await asyncio.sleep(1.5)
-        # 멘트가 모션보다 길면 끝까지 기다림
         try:
             await speech_task
         except Exception as e:
@@ -349,10 +370,8 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     finally:
         if not speech_task.done():
             speech_task.cancel()
-        # 사용자 보이면 watching, 아니면 idle
         ctx.transition(
-            State.WATCHING if ctx.user_present else State.IDLE,
-            face,
+            State.WATCHING if ctx.user_present else State.IDLE, face,
         )
 
 

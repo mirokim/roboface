@@ -356,7 +356,15 @@ def check_chitchat(
     perception: PerceptionState | None = None,
     current_session_id: int | None = None,
 ) -> Optional[ProactiveTrigger]:
-    """일정 간격으로 상황 맞춰 가벼운 잡담 — 사용자 곁에 있다는 느낌."""
+    """일정 간격으로 가벼운 잡담.
+
+    SSOT: ANTHROPIC_API_KEY 설정돼있으면 RobotAgent가 챗챗 담당 → 여기선 항상 None.
+    API 키 없을 때만 풀에서 멘트 골라 fallback.
+    """
+    from src.config import ANTHROPIC_API_KEY
+    if ANTHROPIC_API_KEY:
+        return None   # agent에 위임
+
     if not _proactive_allowed(ctx):
         return None
     last = ctx.last_proactive_at or 0.0
