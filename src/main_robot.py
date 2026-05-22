@@ -354,9 +354,9 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
 async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     """손 흔들기에 대한 응답 — HAPPY 표정 + 짧은 댄스 + 인사 멘트.
 
-    behavior_speaker.say()를 단일 통로로 사용 — quiet hours / cooldown /
-    last_greeting_at 통일 적용. wave_reply가 _GREETING_KINDS에 포함돼
-    5분 인사 cooldown 적용됨.
+    behavior_speaker.say()를 단일 통로로 사용 — quiet hours / cooldown 통일 적용.
+    사용자가 의도적으로 손 흔든 거라 _GREETING_KINDS 5분 cooldown은 적용 X.
+    kind별 짧은 cooldown(10초)만.
     """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return

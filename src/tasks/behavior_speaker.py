@@ -32,12 +32,10 @@ def _busy_state(ctx: StateContext) -> bool:
     return ctx.state in (State.TALKING, State.LISTENING, State.GREETING)
 
 
-# 인사류 — 5분 cooldown 공유 (greeting trigger와 공통). 손/얼굴/등장 등 모든
-# 인사 의미 이벤트는 여기서 통합 게이트.
-_GREETING_KINDS = {
-    "reappear", "face_recognize",
-    "wave_reply", "hands_up_reply",
-}
+# 인사류 — 5분 cooldown 공유 (greeting trigger와 공통).
+# **수동적 인사**만 포함 (사용자 등장/인식 등). 사용자가 능동적으로 손 흔들거나
+# 만세 한 건 5분 cooldown 적용하면 너무 답답 — 거기는 kind별 짧은 cooldown만.
+_GREETING_KINDS = {"reappear", "face_recognize"}
 
 
 def say(
@@ -61,15 +59,21 @@ def say(
     if not text:
         return None
     if _busy_state(ctx):
+        log.debug(f"say skip [{kind}]: busy state ({ctx.state})")
         return None
     if _is_quiet_hours():
+        log.debug(f"say skip [{kind}]: quiet hours")
         return None
     now = time.time()
     if kind in _GREETING_KINDS:
         if ctx.last_greeting_at and now - ctx.last_greeting_at < 300.0:
+            remain = 300.0 - (now - ctx.last_greeting_at)
+            log.debug(f"say skip [{kind}]: greeting cooldown {remain:.0f}s 남음")
             return None
     last = _LAST_AT.get(kind, 0.0)
     if now - last < cooldown_sec:
+        remain = cooldown_sec - (now - last)
+        log.debug(f"say skip [{kind}]: kind cooldown {remain:.1f}s 남음")
         return None
     _LAST_AT[kind] = now
 
