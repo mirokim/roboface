@@ -91,7 +91,7 @@ class HandsUpDetector:
     def __init__(
         self,
         fps: float = 5.0,
-        hold_sec: float = 0.6,
+        hold_sec: float = 0.35,   # 0.6 → 0.35 — 빨리 잡히게
         cooldown_sec: float = 5.0,
     ) -> None:
         self.required_frames = max(2, int(fps * hold_sec))

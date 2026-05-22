@@ -86,7 +86,9 @@ async def run_vision(
     next_snapshot_at = time.time() + 180.0
     last_snapshot_cleanup = 0.0
     # 얼굴 방향 트래킹 — 옆모습/뒷모습일 땐 정면 가정 detector 정지
+    # 단발 노이즈로 잠깐 잘못 판정되는 거 막기 위해 N프레임 연속 같은 방향일 때만 전환
     last_orientation = "unknown"
+    orientation_vote: deque[str] = deque(maxlen=5)   # 최근 5프레임 투표
     last_orientation_log_at = 0.0
     log.info(f"vision task 시작 (mode={VISION_MODE} + wave + emotion + face memory)")
 
@@ -245,8 +247,22 @@ async def run_vision(
                     else:
                         last_keypoints = biggest.keypoints
 
-                    # 얼굴 방향 — 옆/뒷모습이면 정면 가정 detector & 거리 비교 정지
-                    orientation = face_orientation(last_keypoints)
+                    # 얼굴 방향 — 단발 노이즈 무시 위해 최근 5프레임 다수결.
+                    # 3/5 이상 일치하는 방향만 채택. 그렇게 해도 노이즈로 잠깐
+                    # 옆판정돼 wave/제스처 차단되는 거 줄임.
+                    raw_orient = face_orientation(last_keypoints)
+                    orientation_vote.append(raw_orient)
+                    # 다수결
+                    if len(orientation_vote) >= 3:
+                        from collections import Counter as _Counter
+                        most_common, count = _Counter(orientation_vote).most_common(1)[0]
+                        if count >= 3:
+                            orientation = most_common
+                        else:
+                            orientation = last_orientation   # 결정 불가 시 유지
+                    else:
+                        orientation = raw_orient
+
                     now_ot = time.time()
                     if (orientation != last_orientation
                             and now_ot - last_orientation_log_at > 10.0):
@@ -320,6 +336,7 @@ async def run_vision(
                     if pose_stab is not None:
                         pose_stab.update(None, 0.0)
                     dist_window.clear()
+                    orientation_vote.clear()
                     if (perception.person_present
                             and time.time() - perception.last_person_seen_at
                             > detector.away_timeout_sec):

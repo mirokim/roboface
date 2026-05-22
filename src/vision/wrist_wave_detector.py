@@ -52,11 +52,13 @@ class WristWaveDetector:
         fps: float = 5.0,
         history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
-        # 진폭은 어깨너비의 배수 — 거리 무관. 0.5 = 어깨너비 절반만큼 손이 흔들림
-        min_amplitude_ratio: float = 0.4,
-        min_zero_crossings: int = 3,
+        # 진폭은 어깨너비의 배수 — 거리 무관.
+        # 작게 흔들어도 잡히게 0.4 → 0.3 (어깨너비의 30%면 wave로 인정)
+        min_amplitude_ratio: float = 0.3,
+        # 한두 사이클 좌우 흔들기도 잡히게 3 → 2
+        min_zero_crossings: int = 2,
         max_zero_crossings: int = 16,
-        min_eval_frames: int = 6,
+        min_eval_frames: int = 5,   # 6 → 5 (감지 빨리)
     ) -> None:
         self.fps = fps
         self.history_max = max(min_eval_frames, int(fps * history_sec))
