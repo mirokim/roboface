@@ -93,6 +93,10 @@ elif AUDIO_INPUT_DEVICE_RAW.lstrip("-").isdigit():
 else:
     AUDIO_INPUT_DEVICE = AUDIO_INPUT_DEVICE_RAW
 
+# === Web UI ===
+WEB_UI_PORT = int(os.getenv("WEB_UI_PORT", "8080"))
+WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비활성
+
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 응답 빠르고 저렴

@@ -13,3 +13,7 @@ sqlalchemy>=2.0.0      # 작업 시간 / 메모리
 
 # 로깅 / 개발
 loguru>=0.7.0
+
+# Web UI
+aiohttp>=3.9.0
+aiohttp-jinja2>=1.5

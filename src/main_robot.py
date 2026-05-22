@@ -39,6 +39,7 @@ from src.tasks.reactive_face import flash_expression
 from src.tasks.daily_recap import run_daily_recap
 from src.tasks.db_cleanup import run_db_cleanup
 from src.tasks.stats_tick import run_stats_tick
+from src.web.server import run_web_server
 from src.tasks.thermal_state import run_thermal_state
 from src.tasks.vision_task import run_vision
 from src.tasks.voice_assistant import run_voice_assistant
@@ -103,6 +104,10 @@ async def run_robot() -> None:
         asyncio.create_task(run_stats_tick(ctx), name="stats_tick"),
         asyncio.create_task(run_daily_recap(face, ctx), name="daily_recap"),
         asyncio.create_task(run_db_cleanup(), name="db_cleanup"),
+        # Web UI — WEB_UI_PASSWORD 있을 때만 활성. 0.0.0.0:8080 (LAN).
+        asyncio.create_task(
+            run_web_server(face, ctx, perception), name="web",
+        ),
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
         asyncio.create_task(ambient.run(), name="ambient"),

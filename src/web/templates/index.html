@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>📡 Roboface</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>📡 Roboface</h1>
+  <form method="post" action="/logout" class="logout">
+    <button type="submit">로그아웃</button>
+  </form>
+</header>
+
+<main>
+  <!-- 얼굴 미리보기 + 상태 -->
+  <section class="card preview">
+    <img id="face-img" src="/api/face-preview.jpg" alt="face preview">
+    <div class="status">
+      <div><strong id="s-state">—</strong> · <span id="s-expr">—</span></div>
+      <div>
+        사용자: <span id="s-user">—</span>
+        <span class="dim">·</span>
+        거리: <span id="s-dist">—</span>
+        <span class="dim">·</span>
+        온도: <span id="s-temp">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 스탯 -->
+  <section class="card stats">
+    <h2>스탯 <span class="label" id="s-label">—</span></h2>
+    <div class="stat-row">
+      <span>Energy</span>
+      <div class="bar"><div class="fill energy" id="s-energy" style="width:0%"></div></div>
+      <span class="val" id="s-energy-val">0</span>
+    </div>
+    <div class="stat-row">
+      <span>Mood</span>
+      <div class="bar"><div class="fill mood" id="s-mood" style="width:0%"></div></div>
+      <span class="val" id="s-mood-val">0</span>
+    </div>
+    <div class="stat-row">
+      <span>Social</span>
+      <div class="bar"><div class="fill social" id="s-social" style="width:0%"></div></div>
+      <span class="val" id="s-social-val">0</span>
+    </div>
+    <div class="stat-row">
+      <span>Curious</span>
+      <div class="bar"><div class="fill curious" id="s-curious" style="width:0%"></div></div>
+      <span class="val" id="s-curious-val">0</span>
+    </div>
+  </section>
+
+  <!-- 명령 -->
+  <section class="card commands">
+    <h2>명령</h2>
+    <div class="cmd-row">
+      <input id="cmd-speak-text" placeholder="말 시킬 텍스트…">
+      <button id="cmd-speak-btn">🗣️ 전송</button>
+    </div>
+    <div class="cmd-row">
+      <select id="cmd-expr-select"></select>
+      <button id="cmd-expr-btn">표정 적용</button>
+    </div>
+    <div class="cmd-row">
+      <button id="cmd-dance-btn">💃 댄스</button>
+      <button id="cmd-snapshot-btn">📸 스냅샷</button>
+    </div>
+    <div class="cmd-row">
+      <input id="cmd-face-name" placeholder="등록할 이름">
+      <button id="cmd-face-btn">😊 얼굴 등록</button>
+    </div>
+    <div id="cmd-result" class="result"></div>
+  </section>
+
+  <!-- 대화 -->
+  <section class="card conversation">
+    <h2>최근 대화 <button id="refresh-conv">↻</button></h2>
+    <div id="conv-list" class="conv-list"></div>
+  </section>
+
+  <!-- 사진 -->
+  <section class="card snapshots">
+    <h2>사진 메모리 <button id="refresh-snaps">↻</button></h2>
+    <div id="snap-grid" class="snap-grid"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

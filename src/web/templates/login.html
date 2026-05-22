@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roboface — 로그인</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+  <div class="login-box">
+    <h1>📡 Roboface</h1>
+    <form method="post" action="/login">
+      <input type="password" name="password" placeholder="비밀번호" autofocus required>
+      <button type="submit">로그인</button>
+      {% if error %}<p class="error">비밀번호 틀림</p>{% endif %}
+    </form>
+  </div>
+</body>
+</html>
