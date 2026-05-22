@@ -27,25 +27,31 @@ from src.utils.logger import get_logger
 log = get_logger("head_tracker")
 
 
-# 추적 파라미터 — 적극적으로 따라가게
-UPDATE_HZ = 15                 # 10 → 15Hz (반응 빠르게)
-SMOOTHING_ALPHA = 0.35         # 0.08 → 0.35 (한 프레임에 더 크게 따라감)
-PAN_RANGE_DEG = 70             # 50 → 70 (회전 범위 넓힘)
-TILT_RANGE_DEG = 30            # 18 → 30
+# 추적 파라미터 — 적극적이지만 자잘한 움직임 X
+UPDATE_HZ = 15
+SMOOTHING_ALPHA = 0.35
+PAN_RANGE_DEG = 70
+TILT_RANGE_DEG = 30
 RETURN_TO_CENTER_AFTER_SEC = 3
-# 한 프레임당 최대 회전량 — 8도까지 허용
 MAX_STEP_DEG = 8.0
 
-# 카메라 마운트 방향에 따른 뒤집기 — 동작 확인하면서 조정 필요
-PAN_INVERT = True   # 카메라가 사람을 화면 왼쪽에 볼 때 → 오른쪽으로 회전?
-TILT_INVERT = True  # 카메라가 사람 위쪽 볼 때 → 머리 위로?
+# 데드존 — 자잘한 떨림 방지를 위한 3단계:
+# 1) bbox 센터 자체 N프레임 평균 (입력 노이즈 제거)
+# 2) 타깃 각도 변화가 작으면 stable target 유지 (수렴 안정성)
+# 3) 출력 각도 변화가 0.5도 이내면 서보 명령 자체 skip (PWM 떨림 방지)
+BBOX_SMOOTH_N = 4
+TARGET_DEADZONE_DEG = 1.5
+OUTPUT_DEADZONE_DEG = 0.5
 
-# === Breathing — 정지하지 않게 항상 미세 sine wave 추가 ===
-# 4초 주기로 위아래 ±1.5°, 5.7초 주기로 좌우 ±0.5° (소수 점 어긋난 주기 = 자연스러움)
-BREATH_TILT_AMP_DEG = 1.5
-BREATH_TILT_PERIOD_SEC = 4.0
-BREATH_PAN_AMP_DEG = 0.5
-BREATH_PAN_PERIOD_SEC = 5.7
+PAN_INVERT = True
+TILT_INVERT = True
+
+# === Breathing — 미세 진동. 자잘한 움직임으로 보일 정도면 줄여야 함 ===
+# 진폭 줄여서 거의 안 보이게 (이전 1.5, 0.5 → 0.6, 0.3)
+BREATH_TILT_AMP_DEG = 0.6
+BREATH_TILT_PERIOD_SEC = 5.0
+BREATH_PAN_AMP_DEG = 0.3
+BREATH_PAN_PERIOD_SEC = 7.0
 
 
 def _breathing_offsets(t: float) -> tuple[float, float]:
@@ -64,43 +70,65 @@ async def run_head_tracker(
     perception: PerceptionState,
     ctx: StateContext,
 ) -> None:
+    from collections import deque
     period = 1.0 / UPDATE_HZ
     pan_current = float(PAN_CENTER_DEG)
     tilt_current = float(TILT_CENTER_DEG)
+    # bbox 센터 스무딩 — 최근 N프레임 평균
+    bbox_history: deque[tuple[float, float]] = deque(maxlen=BBOX_SMOOTH_N)
+    # 마지막으로 처리한 stable target (데드존 비교용)
+    stable_target_pan = float(PAN_CENTER_DEG)
+    stable_target_tilt = float(TILT_CENTER_DEG)
+    # 마지막으로 서보에 보낸 각도 (출력 데드존용)
+    last_sent_pan = pan_current
+    last_sent_tilt = tilt_current
 
     log.info("head tracker 시작")
 
     while True:
         await asyncio.sleep(period)
 
-        # 다른 task가 서보를 점유 중이면 양보
         if ctx.state in (State.TALKING, State.GREETING, State.LISTENING):
             continue
         if ctx.ambient_motion_active:
             continue
 
-        # 타겟 각도 계산
+        # 타깃 각도 계산
         if perception.person_present:
             cx, cy = perception.person_bbox_center
-            # bbox 중심 (0~1) → 화면 중앙 기준 오프셋 (-0.5 ~ +0.5)
-            ox = cx - 0.5
-            oy = cy - 0.5
+            # bbox 센터 스무딩 — 매 프레임 흔들리는 노이즈 평균
+            bbox_history.append((cx, cy))
+            avg_cx = sum(p[0] for p in bbox_history) / len(bbox_history)
+            avg_cy = sum(p[1] for p in bbox_history) / len(bbox_history)
+
+            # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
+            ox = avg_cx - 0.5
+            oy = avg_cy - 0.5
             if PAN_INVERT:
                 ox = -ox
             if TILT_INVERT:
                 oy = -oy
-            target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
-            target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
+            new_target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
+            new_target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
+
+            # 타깃 데드존: 작은 변화는 무시 (수렴 안정성)
+            if (abs(new_target_pan - stable_target_pan) > TARGET_DEADZONE_DEG
+                    or abs(new_target_tilt - stable_target_tilt) > TARGET_DEADZONE_DEG):
+                stable_target_pan = new_target_pan
+                stable_target_tilt = new_target_tilt
+
+            target_pan = stable_target_pan
+            target_tilt = stable_target_tilt
         else:
-            # 사람 없으면 중앙 복귀
+            bbox_history.clear()
             target_pan = PAN_CENTER_DEG
             target_tilt = TILT_CENTER_DEG
+            stable_target_pan = PAN_CENTER_DEG
+            stable_target_tilt = TILT_CENTER_DEG
 
-        # 가동 범위 제한
         target_pan = _clamp(target_pan, PAN_MIN_DEG, PAN_MAX_DEG)
         target_tilt = _clamp(target_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
 
-        # 지수 평활화 + 프레임당 최대 회전량 제한 — 천천히, 격하지 않게
         pan_delta = (target_pan - pan_current) * SMOOTHING_ALPHA
         tilt_delta = (target_tilt - tilt_current) * SMOOTHING_ALPHA
         pan_delta = _clamp(pan_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
@@ -108,10 +136,17 @@ async def run_head_tracker(
         pan_current += pan_delta
         tilt_current += tilt_delta
 
-        # 호흡 오프셋 — 항상 살아있는 미세 진동
+        # 호흡 오프셋 — 작게 (자잘한 떨림 안 보일 정도)
         breath_pan, breath_tilt = _breathing_offsets(time.monotonic())
         out_pan = _clamp(pan_current + breath_pan, PAN_MIN_DEG, PAN_MAX_DEG)
         out_tilt = _clamp(tilt_current + breath_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+
+        # 출력 데드존 — 직전 명령과 OUTPUT_DEADZONE_DEG 이내면 명령 skip
+        if (abs(out_pan - last_sent_pan) < OUTPUT_DEADZONE_DEG
+                and abs(out_tilt - last_sent_tilt) < OUTPUT_DEADZONE_DEG):
+            continue
+        last_sent_pan = out_pan
+        last_sent_tilt = out_tilt
 
         try:
             servos.set_angles(out_pan, out_tilt)
