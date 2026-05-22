@@ -19,6 +19,46 @@ from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision import debug_snapshot, photo_memory
+from src.vision.hand_gestures import HandGestureDetector
+
+
+# MediaPipe gesture 카테고리 이름 → SensorEventType
+def _build_hand_event_map() -> dict:
+    return {
+        "thumb_up":    SensorEventType.HAND_THUMB_UP,
+        "thumb_down":  SensorEventType.HAND_THUMB_DOWN,
+        "victory":     SensorEventType.HAND_VICTORY,
+        "open_palm":   SensorEventType.HAND_OPEN_PALM,
+        "fist":        SensorEventType.HAND_FIST,
+        "pointing_up": SensorEventType.HAND_POINTING,
+        "iloveyou":    SensorEventType.HAND_ILOVEYOU,
+    }
+
+
+_HAND_GESTURE_EVENTS = _build_hand_event_map()
+
+
+def _to_rgb(frame):
+    """picamera2가 주는 frame을 MediaPipe용 RGB로 변환.
+
+    main stream은 보통 XBGR8888 (4채널, BGRX 순). RGB 3채널로 변환.
+    이미 RGB 3채널이면 그대로.
+    """
+    if frame is None:
+        return None
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    if frame.ndim == 3 and frame.shape[2] == 3:
+        return frame
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        # XBGR8888: channels = [B, G, R, X]. RGB로 변환
+        try:
+            return np.ascontiguousarray(frame[..., 2::-1])  # B,G,R,X → R,G,B
+        except Exception:
+            return None
+    return None
 from src.vision.pose_gestures import (
     GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
     face_orientation,
@@ -64,6 +104,7 @@ async def run_vision(
     head_shake_detector: HeadShakeDetector | None = None
     gaze_detector: GazeAtMeDetector | None = None
     pose_stab: PoseStabilizer | None = None
+    hand_gesture: HandGestureDetector | None = None
     if VISION_MODE == "pose":
         wave_detector = WristWaveDetector(fps=fps)
         hands_up_detector = HandsUpDetector(fps=fps)
@@ -71,6 +112,11 @@ async def run_vision(
         head_shake_detector = HeadShakeDetector(fps=fps)
         gaze_detector = GazeAtMeDetector(fps=fps)
         pose_stab = PoseStabilizer(fps=fps)
+        # MediaPipe Hands — CPU에서 손 21 keypoint + 7 카테고리 제스처
+        try:
+            hand_gesture = HandGestureDetector(fps=fps)
+        except Exception as e:
+            log.warning(f"MediaPipe hand detector 초기화 실패: {e}")
     else:
         wave_detector = WaveDetector(fps=fps)
     emotion_mirror = EmotionMirror() if face is not None else None
@@ -423,6 +469,31 @@ async def run_vision(
                                 head_shake_detector.reset()
                             if gaze_detector is not None:
                                 gaze_detector.reset()
+                    # MediaPipe Hands (CPU) — 손 21 keypoint + 7 카테고리 + wave.
+                    # IMX500 pose는 손목만 알지 손 모양 모름. 이게 보강.
+                    if (hand_gesture is not None and frame is not None
+                            and gesture_gate_ok):
+                        rgb = _to_rgb(frame)
+                        if rgb is not None:
+                            ts_ms = int(time.time() * 1000)
+                            try:
+                                gname, mp_wave = hand_gesture.process(rgb, ts_ms)
+                            except Exception as e:
+                                log.debug(f"hand_gesture 에러: {e}")
+                                gname, mp_wave = None, False
+                            if mp_wave:
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GESTURE_WAVE,
+                                    data={"bbox": effective_bbox,
+                                          "source": "mediapipe"},
+                                ))
+                            if gname:
+                                event_type = _HAND_GESTURE_EVENTS.get(gname)
+                                if event_type is not None:
+                                    emit_event(SensorEvent(
+                                        type=event_type, data={"source": "mediapipe"},
+                                    ))
+
                     cur_emotion: str | None = None
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)
@@ -529,3 +600,8 @@ async def run_vision(
             cam.close()
         except Exception:
             pass
+        if hand_gesture is not None:
+            try:
+                hand_gesture.close()
+            except Exception:
+                pass

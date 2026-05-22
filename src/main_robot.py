@@ -263,6 +263,28 @@ def _handle_sensor_event(
         log.info("👀 정면 응시 응답 시작")
         memory.log_user("(사용자가 나를 쳐다봄)", kind="gaze_at_me")
         asyncio.create_task(_simple_reply(ctx, face, "gaze"))
+    # MediaPipe Hands 기반 손 제스처 — 카테고리별 단순 reply
+    elif ev.type == SensorEventType.HAND_THUMB_UP:
+        memory.log_user("(엄지척 👍)", kind="hand_thumb_up")
+        asyncio.create_task(_simple_reply(ctx, face, "thumb_up"))
+    elif ev.type == SensorEventType.HAND_THUMB_DOWN:
+        memory.log_user("(엄지 다운 👎)", kind="hand_thumb_down")
+        asyncio.create_task(_simple_reply(ctx, face, "thumb_down"))
+    elif ev.type == SensorEventType.HAND_VICTORY:
+        memory.log_user("(V사인 ✌️)", kind="hand_victory")
+        asyncio.create_task(_simple_reply(ctx, face, "victory"))
+    elif ev.type == SensorEventType.HAND_OPEN_PALM:
+        memory.log_user("(손바닥 🖐️)", kind="hand_open_palm")
+        asyncio.create_task(_simple_reply(ctx, face, "open_palm"))
+    elif ev.type == SensorEventType.HAND_FIST:
+        memory.log_user("(주먹 👊)", kind="hand_fist")
+        asyncio.create_task(_simple_reply(ctx, face, "fist"))
+    elif ev.type == SensorEventType.HAND_POINTING:
+        memory.log_user("(검지 ☝️)", kind="hand_pointing")
+        asyncio.create_task(_simple_reply(ctx, face, "pointing"))
+    elif ev.type == SensorEventType.HAND_ILOVEYOU:
+        memory.log_user("(사랑해 🤟)", kind="hand_iloveyou")
+        asyncio.create_task(_simple_reply(ctx, face, "iloveyou"))
 
 
 async def _simple_reply(

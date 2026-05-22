@@ -22,6 +22,14 @@ class SensorEventType(Enum):
     GESTURE_HEAD_NOD = "gesture_head_nod"  # 고개 끄덕임 (yes)
     GESTURE_HEAD_SHAKE = "gesture_head_shake"  # 고개 도리도리 (no)
     GAZE_AT_ME = "gaze_at_me"              # 사용자가 로봇 정면 응시
+    # MediaPipe Hands 기반 손 제스처
+    HAND_THUMB_UP = "hand_thumb_up"        # 👍
+    HAND_THUMB_DOWN = "hand_thumb_down"    # 👎
+    HAND_VICTORY = "hand_victory"          # ✌️
+    HAND_OPEN_PALM = "hand_open_palm"      # 🖐️
+    HAND_FIST = "hand_fist"                # 👊
+    HAND_POINTING = "hand_pointing"        # ☝️
+    HAND_ILOVEYOU = "hand_iloveyou"        # 🤟
 
 
 @dataclass

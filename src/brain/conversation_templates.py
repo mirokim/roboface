@@ -46,11 +46,40 @@ GAZE_REPLIES: tuple[str, ...] = (
 )
 
 
+THUMB_UP_REPLIES = (
+    "오, 잘됐어?", "굳!", "좋네!", "엄지척이야?", "잘하고 있어.",
+)
+THUMB_DOWN_REPLIES = (
+    "별로야?", "음... 아쉽네.", "왜, 뭐가 잘 안 됐어?", "그래, 다음엔 잘 될 거야.",
+)
+VICTORY_REPLIES = (
+    "오! 뭐 이긴 거야?", "V사인 좋다.", "기분 좋아 보이네.", "축하해!",
+)
+OPEN_PALM_REPLIES = (
+    "오, 손바닥?", "하이파이브?", "왜?", "뭐 줄 거 있어?",
+)
+FIST_REPLIES = (
+    "오, 주먹!", "강하다!", "화이팅이야?", "음, 뭔가 결심한 표정.",
+)
+POINTING_REPLIES = (
+    "뭐 가리킨 거야?", "어? 어디?", "오, 저거?",
+)
+ILOVEYOU_REPLIES = (
+    "오, 사랑해! 나도.", "고마워!", "헤헤 부끄럽다.",
+)
+
 GESTURE_POOLS: dict[str, tuple[str, ...]] = {
     "hands_up": HANDS_UP_REPLIES,
     "nod": HEAD_NOD_REPLIES,
     "shake": HEAD_SHAKE_REPLIES,
     "gaze": GAZE_REPLIES,
+    "thumb_up": THUMB_UP_REPLIES,
+    "thumb_down": THUMB_DOWN_REPLIES,
+    "victory": VICTORY_REPLIES,
+    "open_palm": OPEN_PALM_REPLIES,
+    "fist": FIST_REPLIES,
+    "pointing": POINTING_REPLIES,
+    "iloveyou": ILOVEYOU_REPLIES,
 }
 
 
