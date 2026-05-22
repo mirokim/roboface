@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 import time
 
 from src.brain.perception import PerceptionState
@@ -48,17 +49,34 @@ PAN_INVERT = True
 TILT_INVERT = True
 
 # === Breathing — 자연 호흡은 위아래만. PAN은 0으로 (갸우뚱 거슬림). ===
-# 60초 주기 + 진폭 0.25° — 매우 느리고 미세 (들숨 30초 + 날숨 30초)
-BREATH_TILT_AMP_DEG = 0.25
+# 60초 주기 — 매우 느림. 진폭은 매 사이클 0.25~0.5° 랜덤 (단조롭지 않게).
+BREATH_TILT_AMP_MIN_DEG = 0.25
+BREATH_TILT_AMP_MAX_DEG = 0.5
 BREATH_TILT_PERIOD_SEC = 60.0
 BREATH_PAN_AMP_DEG = 0.0    # 좌우 호흡 거슬리니까 끔
 BREATH_PAN_PERIOD_SEC = 60.0
 
 
+# 사이클 단위로 진폭 랜덤화 — 같은 사이클 안에선 안정.
+_breath_state = {
+    "last_cycle": -1,
+    "current_amp": BREATH_TILT_AMP_MAX_DEG,
+}
+
+
 def _breathing_offsets(t: float) -> tuple[float, float]:
-    """현재 시각의 호흡 (pan_offset, tilt_offset)."""
+    """현재 시각의 호흡 (pan_offset, tilt_offset). 사이클 바뀌면 진폭 새로."""
+    cycle = int(t / BREATH_TILT_PERIOD_SEC)
+    if cycle != _breath_state["last_cycle"]:
+        _breath_state["last_cycle"] = cycle
+        _breath_state["current_amp"] = random.uniform(
+            BREATH_TILT_AMP_MIN_DEG, BREATH_TILT_AMP_MAX_DEG,
+        )
     pan = math.sin(t * 2 * math.pi / BREATH_PAN_PERIOD_SEC) * BREATH_PAN_AMP_DEG
-    tilt = math.sin(t * 2 * math.pi / BREATH_TILT_PERIOD_SEC) * BREATH_TILT_AMP_DEG
+    tilt = (
+        math.sin(t * 2 * math.pi / BREATH_TILT_PERIOD_SEC)
+        * _breath_state["current_amp"]
+    )
     return pan, tilt
 
 
