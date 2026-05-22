@@ -117,18 +117,27 @@ class HandsUpDetector:
             return False
         if time.time() - self._last_at < self.cooldown_sec:
             return False
-        nose = keypoints[KP_NOSE]
         l_wrist = keypoints[KP_L_WRIST]
         r_wrist = keypoints[KP_R_WRIST]
+        l_sh = keypoints[KP_L_SHOULDER]
+        r_sh = keypoints[KP_R_SHOULDER]
         if (
-            nose[2] < self.KP_CONF_THRESHOLD
-            or l_wrist[2] < self.KP_CONF_THRESHOLD
+            l_wrist[2] < self.KP_CONF_THRESHOLD
             or r_wrist[2] < self.KP_CONF_THRESHOLD
+            or l_sh[2] < self.KP_CONF_THRESHOLD
+            or r_sh[2] < self.KP_CONF_THRESHOLD
         ):
             self._consecutive = 0
             return False
-        # 양 손목이 코보다 위 (y 더 작음)
-        if l_wrist[1] < nose[1] and r_wrist[1] < nose[1]:
+        # 어깨 기준 좌표 사용 (카메라 각도에 무관). 어깨너비로 정규화한 "위" 거리.
+        shoulder_y = float((l_sh[1] + r_sh[1]) / 2)
+        shoulder_width = float(abs(l_sh[0] - r_sh[0]))
+        if shoulder_width < 0.02:
+            self._consecutive = 0
+            return False
+        # 손목이 어깨보다 위 (y 작음) + 어깨너비의 30% 이상 떨어져 있어야 인정
+        threshold = shoulder_y - shoulder_width * 0.3
+        if l_wrist[1] < threshold and r_wrist[1] < threshold:
             self._consecutive += 1
             if self._consecutive >= self.required_frames:
                 log.info("🙌 양손 만세 감지!")
@@ -281,17 +290,28 @@ class GazeAtMeDetector:
     """사용자가 다른 곳 보고 있다가 로봇 쪽으로 시선 돌린 순간 감지.
 
     원리:
-      매 프레임 "정면 응시 여부" 측정. nose가 두 눈 중간 가까우면 정면.
+      매 프레임 "정면 응시 여부" 측정. nose가 두 눈 중간 가까우면 정면
+      (x축 정렬). 카메라가 사용자보다 낮게 책상에 있어 사용자를 올려다보는
+      시점이라, 화면(위)을 보면 코가 눈 라인 위 또는 비슷한 y로 보이고
+      반대로 로봇(아래)을 내려다보면 코가 눈보다 더 아래(y 큼)로 떨어짐.
+      이 vertical 시그널을 함께 써서 "screen 보는 중" vs "robot 보는 중"
+      구분.
+
       시간 윈도우 둘로 나눠:
         - before: hold_sec 이전 before_window_sec 동안 mostly NOT facing (<50%)
         - now: 최근 hold_sec 동안 mostly facing (>80%)
       이 두 조건 동시 만족 → "시선 전환" 감지 (의도적으로 쳐다봄).
 
-    그냥 책상에 앉아 정면 향한 채 작업하는 건 (계속 facing) 감지 X.
+    그냥 책상에 앉아 정면(화면) 향한 채 작업하는 건 — 코가 눈보다 위로
+    떠 있어 facing 판정 X. 의도적으로 고개 숙여 로봇 쳐다봐야 잡힘.
     """
 
     KP_CONF_THRESHOLD = 0.20
     OFFSET_RATIO_MAX = 0.25
+    # 낮은 카메라 시점에서 "로봇을 보는 중"의 nose-below-eyes 최소 비율.
+    # nose_y - eye_y >= eye_dist * 이 값 이어야 facing 인정.
+    # 0이면 vertical 무시 (구버전과 동일), 양수면 고개 살짝이라도 숙여야 함.
+    PITCH_RATIO_MIN = 0.15
 
     def __init__(
         self,
@@ -334,9 +354,15 @@ class GazeAtMeDetector:
         eye_dist = float(abs(l_eye[0] - r_eye[0]))
         if eye_dist < 0.015:
             return False
+        # x축 정렬 (양 눈 중간에 코가 있어야 정면)
         mid_eye_x = float((l_eye[0] + r_eye[0]) / 2)
         offset_ratio = abs(float(nose[0]) - mid_eye_x) / eye_dist
-        return offset_ratio < self.OFFSET_RATIO_MAX
+        if offset_ratio >= self.OFFSET_RATIO_MAX:
+            return False
+        # y축 pitch — 낮은 카메라이므로 로봇 보면 nose가 eye보다 아래(y 큼)
+        mid_eye_y = float((l_eye[1] + r_eye[1]) / 2)
+        pitch_ratio = (float(nose[1]) - mid_eye_y) / eye_dist
+        return pitch_ratio >= self.PITCH_RATIO_MIN
 
     def process(self, keypoints: Any) -> bool:
         if keypoints is None:

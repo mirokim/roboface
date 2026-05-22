@@ -187,11 +187,13 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 다리 모션 오인 방지. 어깨~가슴 정도까지 (정규화 0.4 = 화면 40%)는 wave 허용.
-        max_below = 0.4
+        # 다리 모션 오인 방지. 어깨너비 비례 — 카메라 시점/거리에 무관.
+        # 어깨~허리 정도 (어깨너비×2.0)까지만 wave 허용. 낮은 카메라에선 어깨가
+        # 화면 중하단에 가므로 절대값 기준은 부적절. 비례로 가야 함.
+        max_below = shoulder_width * 2.0
         self.frames_seen += 1
 
-        # 손목 push: confidence 통과 AND 손목이 다리 높이는 아닐 때
+        # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
         pushed_any = False
         for wrist, history in (
             (l_wrist, self.left_history),
@@ -200,7 +202,7 @@ class WristWaveDetector:
             if wrist[2] < self.KP_CONF_THRESHOLD:
                 self.reject_low_conf += 1
                 continue
-            if wrist[1] > shoulder_y + max_below:   # 다리 높이 — 무시
+            if wrist[1] > shoulder_y + max_below:   # 허리 아래 — 무시
                 self.reject_below_legs += 1
                 continue
             history.append(float(wrist[0]))
