@@ -46,11 +46,10 @@ OUTPUT_DEADZONE_DEG = 0.5
 PAN_INVERT = True
 TILT_INVERT = True
 
-# === Breathing — 미세 진동. 자잘한 움직임으로 보일 정도면 줄여야 함 ===
-# 진폭 줄여서 거의 안 보이게 (이전 1.5, 0.5 → 0.6, 0.3)
-BREATH_TILT_AMP_DEG = 0.6
+# === Breathing — 보일 듯 말 듯 살아있는 느낌만 ===
+BREATH_TILT_AMP_DEG = 0.4
 BREATH_TILT_PERIOD_SEC = 5.0
-BREATH_PAN_AMP_DEG = 0.3
+BREATH_PAN_AMP_DEG = 0.2
 BREATH_PAN_PERIOD_SEC = 7.0
 
 
