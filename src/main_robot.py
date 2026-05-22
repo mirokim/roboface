@@ -74,7 +74,9 @@ async def run_robot() -> None:
         log.warning(f"서보 home 실패: {e}")
 
     work_tracker = WorkTracker()
-    posture = PostureMonitor()
+    posture = PostureMonitor(
+        keypoints_provider=lambda: perception.last_pose_keypoints,
+    )
     ambient = AmbientListener()
     ambient.add_handler(schedule_extractor.handle_transcript)
     ambient.add_handler(journal_writer.handle_transcript)

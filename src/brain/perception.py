@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -20,24 +21,29 @@ class PerceptionState:
     person_bbox: tuple[float, float, float, float] | None = None
     person_distance_cm: float = -1.0
     last_person_seen_at: float = 0.0
+    # pose 모드의 smoothed keypoints (17, 3) — posture_monitor 등이 참조
+    last_pose_keypoints: Any = None
 
     # 환경
     temperature_c: float | None = None
     humidity_pct: float | None = None
 
     def update_person(self, bbox: tuple[float, float, float, float] | None,
-                      distance_cm: float = -1.0) -> None:
+                      distance_cm: float = -1.0,
+                      keypoints: Any = None) -> None:
         if bbox is not None:
             self.person_present = True
             self.person_bbox = bbox
             self.person_distance_cm = distance_cm
             self.last_person_seen_at = time.time()
-        # 없을 때는 명시적으로 clear되지 않음 (person_detector가 timeout 관리)
+            if keypoints is not None:
+                self.last_pose_keypoints = keypoints
 
     def clear_person(self) -> None:
         self.person_present = False
         self.person_bbox = None
         self.person_distance_cm = -1.0
+        self.last_pose_keypoints = None
 
     @property
     def person_bbox_center(self) -> tuple[float, float]:

@@ -283,10 +283,6 @@ async def run_vision(
                         key=lambda d: (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]),
                     )
                     cur_dist = detector._last_distance or -1.0
-                    perception.update_person(
-                        bbox=biggest.bbox,
-                        distance_cm=cur_dist,
-                    )
                     person_bbox = biggest.bbox
                     # pose 모드: stabilizer로 keypoints 스무딩
                     if pose_stab is not None:
@@ -295,6 +291,12 @@ async def run_vision(
                         )
                     else:
                         last_keypoints = biggest.keypoints
+                    # perception에 keypoints까지 — posture_monitor가 참조
+                    perception.update_person(
+                        bbox=biggest.bbox,
+                        distance_cm=cur_dist,
+                        keypoints=last_keypoints,
+                    )
 
                     # 얼굴 방향 — 단발 노이즈 무시 위해 최근 5프레임 다수결.
                     # 3/5 이상 일치하는 방향만 채택. 그렇게 해도 노이즈로 잠깐
