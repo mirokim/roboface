@@ -84,10 +84,10 @@ async def dance(
     servos: ServoController,
     face: FaceState,
     *,
-    bpm: int = 120,
+    bpm: int = 100,
     beats: int = 8,
-    pan_amp_deg: float = 25.0,
-    tilt_amp_deg: float = 10.0,
+    pan_amp_deg: float = 15.0,    # 25 → 15 (격함 줄이기)
+    tilt_amp_deg: float = 6.0,    # 10 → 6
     update_hz: int = 30,
 ) -> None:
     """춤추는 듯한 머리 흔들기 + 표정/입 사이클.
@@ -159,10 +159,10 @@ async def dance(
 async def sway(
     servos: ServoController,
     *,
-    bpm: int = 70,
+    bpm: int = 55,                # 70 → 55 (더 느긋)
     beats: int = 4,
-    pan_amp_deg: float = 10.0,
-    tilt_amp_deg: float = 3.0,
+    pan_amp_deg: float = 7.0,     # 10 → 7
+    tilt_amp_deg: float = 2.0,    # 3 → 2
     update_hz: int = 25,
 ) -> None:
     """은은한 살랑살랑 — 표정/입은 건드리지 않음. ambient 백그라운드용.

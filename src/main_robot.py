@@ -296,7 +296,7 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     await asyncio.sleep(0)
     try:
         if servos is not None:
-            await poses.dance(servos, face, bpm=150, beats=4)
+            await poses.dance(servos, face, bpm=110, beats=4)
         else:
             await asyncio.sleep(1.5)
         try:
@@ -328,7 +328,7 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     await asyncio.sleep(0)
     try:
         if servos is not None:
-            await poses.dance(servos, face, bpm=140, beats=4)
+            await poses.dance(servos, face, bpm=100, beats=4)
         else:
             await asyncio.sleep(1.5)
         # 멘트가 모션보다 길면 끝까지 기다림

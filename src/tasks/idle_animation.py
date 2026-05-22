@@ -38,9 +38,9 @@ async def run_idle_gaze(
         if perception is not None and perception.person_present:
             continue
 
-        # 무작위 방향으로 살짝 응시 (-0.6 ~ +0.6)
-        dx = random.uniform(-0.6, 0.6)
-        dy = random.uniform(-0.3, 0.3)
+        # 무작위 방향으로 살짝 응시 — 좀 차분하게 (-0.4 ~ +0.4)
+        dx = random.uniform(-0.4, 0.4)
+        dy = random.uniform(-0.2, 0.2)
         face.eye_state.gaze_x = dx
         face.eye_state.gaze_y = dy
         log.debug(f"idle gaze → ({dx:.2f}, {dy:.2f})")
@@ -94,19 +94,19 @@ async def run_ambient_motion(
         # 사용자가 있으면 head_tracker를 너무 길게 끊지 않게 짧고 작게
         if ctx.user_present:
             params = dict(
-                bpm=random.randint(65, 90),
+                bpm=random.randint(50, 70),
                 beats=random.choice([1, 2]),
-                pan_amp_deg=random.uniform(4.0, 8.0),
-                tilt_amp_deg=random.uniform(1.5, 3.5),
+                pan_amp_deg=random.uniform(3.0, 5.0),
+                tilt_amp_deg=random.uniform(1.0, 2.0),
             )
         elif random.random() < _AMBIENT_LIVELY_PROB:
-            params = dict(bpm=110, beats=6, pan_amp_deg=18.0, tilt_amp_deg=6.0)
+            params = dict(bpm=80, beats=6, pan_amp_deg=10.0, tilt_amp_deg=3.0)
         else:
             params = dict(
-                bpm=random.randint(55, 80),
+                bpm=random.randint(45, 65),
                 beats=random.choice([2, 3, 4]),
-                pan_amp_deg=random.uniform(6.0, 13.0),
-                tilt_amp_deg=random.uniform(2.0, 5.0),
+                pan_amp_deg=random.uniform(4.0, 7.0),
+                tilt_amp_deg=random.uniform(1.0, 2.5),
             )
 
         ctx.ambient_motion_active = True

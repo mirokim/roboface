@@ -29,10 +29,12 @@ log = get_logger("head_tracker")
 
 # 추적 파라미터
 UPDATE_HZ = 10                 # 초당 갱신 횟수
-SMOOTHING_ALPHA = 0.25         # 0.0(고정) ~ 1.0(즉시) — 부드러움
-PAN_RANGE_DEG = 60             # bbox.x 좌→우 = ±이만큼 회전
-TILT_RANGE_DEG = 25            # bbox.y 위→아래 = ±이만큼
-RETURN_TO_CENTER_AFTER_SEC = 3  # 사람 부재 N초 후 중앙 복귀
+SMOOTHING_ALPHA = 0.08         # 0.0(고정) ~ 1.0(즉시). 낮을수록 천천히. 0.25 → 0.08
+PAN_RANGE_DEG = 50             # bbox.x 좌→우 = ±이만큼 회전 (60 → 50)
+TILT_RANGE_DEG = 18            # bbox.y 위→아래 (25 → 18)
+RETURN_TO_CENTER_AFTER_SEC = 3
+# 한 프레임당 최대 회전량 (도). smoothing이 빠른 동작 만들어도 이 이상은 안 돌게.
+MAX_STEP_DEG = 4.0
 
 # 카메라 마운트 방향에 따른 뒤집기 — 동작 확인하면서 조정 필요
 PAN_INVERT = True   # 카메라가 사람을 화면 왼쪽에 볼 때 → 오른쪽으로 회전?
@@ -98,9 +100,13 @@ async def run_head_tracker(
         target_pan = _clamp(target_pan, PAN_MIN_DEG, PAN_MAX_DEG)
         target_tilt = _clamp(target_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
 
-        # 지수 평활화 — 떨림 방지
-        pan_current += (target_pan - pan_current) * SMOOTHING_ALPHA
-        tilt_current += (target_tilt - tilt_current) * SMOOTHING_ALPHA
+        # 지수 평활화 + 프레임당 최대 회전량 제한 — 천천히, 격하지 않게
+        pan_delta = (target_pan - pan_current) * SMOOTHING_ALPHA
+        tilt_delta = (target_tilt - tilt_current) * SMOOTHING_ALPHA
+        pan_delta = _clamp(pan_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
+        tilt_delta = _clamp(tilt_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
+        pan_current += pan_delta
+        tilt_current += tilt_delta
 
         # 호흡 오프셋 — 항상 살아있는 미세 진동
         breath_pan, breath_tilt = _breathing_offsets(time.monotonic())

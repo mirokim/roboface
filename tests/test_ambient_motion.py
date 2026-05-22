@@ -104,8 +104,8 @@ def test_ambient_motion_runs_in_idle(monkeypatch):
 
     asyncio.run(run_briefly())
     assert len(calls) >= 1
-    # idle + no user → "free" 파라미터 (bpm 55~110)
-    assert all(55 <= c["bpm"] <= 110 for c in calls)
+    # idle + no user → "free" 파라미터 (bpm 45~80)
+    assert all(45 <= c["bpm"] <= 80 for c in calls)
     # 끝나면 플래그 해제됨
     assert ctx.ambient_motion_active is False
 
