@@ -212,21 +212,21 @@ def _handle_sensor_event(
     work_tracker.on_event(ev, ctx)
     if ev.type == SensorEventType.PRESENCE_NEW:
         now = time.time()
-        absence_sec = (
-            now - ctx.last_user_seen_at if ctx.last_user_seen_at else 99999.0
-        )
+        # last_user_seen_at이 None이면 부팅 후 첫 등장 — "오랜만" 발동되면 어색.
+        # 보수적으로 60초 부재로 취급 (짧은 인사 풀에 매핑됨)
+        first_time = ctx.last_user_seen_at is None
+        absence_sec = (now - ctx.last_user_seen_at) if not first_time else 60.0
         ctx.user_present = True
         ctx.last_user_seen_at = now
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
-        # 사용자가 갑자기 들어옴 → 잠깐 놀란 표정 + 부재 시간 기반 멘트
         flash_expression(face, SURPRISED, 0.45)
-        # 30초 미만이면 재등장 멘트 굳이 X (계속 있는 것과 구분 안 됨)
-        # Claude 에이전트 컨텍스트용 이벤트 로그
         memory.log_user(
-            f"(등장 — 부재 {int(absence_sec)}초)", kind="presence_new",
+            f"(등장 — 부재 {int(absence_sec)}초"
+            f"{', 부팅 직후' if first_time else ''})",
+            kind="presence_new",
         )
-        if absence_sec > 30:
+        if absence_sec > 30 or first_time:
             behavior_speaker.say(
                 face, ctx,
                 behavior_speaker.reappear_message(absence_sec, ctx),
@@ -275,7 +275,10 @@ async def _simple_reply(
     """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
-    msg = conversation_templates.pick(gesture_kind)
+    loop = asyncio.get_running_loop()
+    msg = await loop.run_in_executor(
+        None, lambda: conversation_templates.pick(gesture_kind, ctx),
+    )
     log.info(f"🗣️  {msg}")
     asyncio.create_task(fake_speak(face, msg))
     memory.log_robot(msg, kind=f"gesture_{gesture_kind}")
@@ -288,7 +291,10 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     from src.face.expressions import STARSTRUCK
     face.apply_expression(STARSTRUCK)
     ctx.transition(State.GREETING, face)
-    msg = conversation_templates.pick("hands_up")
+    loop = asyncio.get_running_loop()
+    msg = await loop.run_in_executor(
+        None, lambda: conversation_templates.pick("hands_up", ctx),
+    )
     log.info(f"🗣️  {msg}")
     ctx.last_greeting_at = time.time()
     memory.log_robot(msg, kind="hands_up_reply")
@@ -318,7 +324,11 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
         return
     face.apply_expression(HAPPY)
     ctx.transition(State.GREETING, face)
-    greeting = behavior_speaker.wave_back_message(ctx)
+    # Claude 호출이 sync고 1초 가량 — executor로 빼서 이벤트 루프 안 막게
+    loop = asyncio.get_running_loop()
+    greeting = await loop.run_in_executor(
+        None, behavior_speaker.wave_back_message, ctx,
+    )
     log.info(f"🗣️  {greeting}")
     ctx.last_greeting_at = time.time()
     memory.log_robot(greeting, kind="wave_reply")

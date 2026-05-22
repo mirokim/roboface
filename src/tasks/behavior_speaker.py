@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 
 from src.audio.fake_tts import speak as fake_speak
-from src.brain import memory
+from src.brain import conversation, memory
 from src.brain.state_machine import State, StateContext
 from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
@@ -172,8 +172,30 @@ FACE_GREETING_TEMPLATES = (
 )
 
 
+def _claude_situational(event_kind: str, ctx: StateContext, extra: dict | None = None) -> str:
+    """Claude 기반 상황 멘트 — 실패/없으면 빈 문자열."""
+    try:
+        recent = memory.recent_conversation(minutes=20.0, limit=8)
+    except Exception:
+        recent = None
+    try:
+        return conversation.generate_situational(
+            event_kind,
+            user_name=getattr(ctx, "user_name", None),
+            extra=extra,
+            recent_dialog=recent,
+        )
+    except Exception:
+        return ""
+
+
 def reappear_message(absence_sec: float, ctx: StateContext) -> str:
-    """부재 시간 + 시간대 + 이름 조합으로 멘트 선택. 최근 발화 안 반복."""
+    """부재 시간 + 시간대 + 이름 조합. Claude가 있으면 매번 새로 생성, 없으면 풀."""
+    # Claude로 시도 — 매번 새 멘트 (반복 X)
+    msg = _claude_situational("reappear", ctx, extra={"absence_sec": int(absence_sec)})
+    if msg:
+        return msg
+    # Fallback: 풀
     name_pre = _name_prefix(ctx)
     period = _now_period()
     if absence_sec >= 600:
@@ -188,14 +210,33 @@ def reappear_message(absence_sec: float, ctx: StateContext) -> str:
 
 
 def closer_message() -> str:
+    # ctx 없이 호출됨 (vision_task에서). Claude 가능하면 시도.
+    try:
+        msg = conversation.generate_situational("got_closer")
+        if msg:
+            return msg
+    except Exception:
+        pass
     return _pick_fresh(GOT_CLOSER)
 
 
 def farther_message() -> str:
+    try:
+        msg = conversation.generate_situational("got_farther")
+        if msg:
+            return msg
+    except Exception:
+        pass
     return _pick_fresh(GOT_FARTHER)
 
 
 def face_greeting_message(name: str) -> str:
+    try:
+        msg = conversation.generate_situational("face_recognize", user_name=name)
+        if msg:
+            return msg
+    except Exception:
+        pass
     template = _pick_fresh(FACE_GREETING_TEMPLATES)
     return template.format(name=name)
 
@@ -208,7 +249,10 @@ _WAVE_SHORT = (
 
 
 def wave_back_message(ctx: StateContext) -> str:
-    """손 흔들기 답례 — 시간대 + 이름 인식 + 최근 발화 안 반복."""
+    """손 흔들기 답례 — Claude 시도, 실패 시 풀."""
+    msg = _claude_situational("wave_reply", ctx)
+    if msg:
+        return msg
     period = _now_period()
     name_pre = _name_prefix(ctx)
     if random.random() < 0.5:

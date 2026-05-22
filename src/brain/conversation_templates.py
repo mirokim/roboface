@@ -54,7 +54,24 @@ GESTURE_POOLS: dict[str, tuple[str, ...]] = {
 }
 
 
-def pick(kind: str) -> str:
-    """제스처 kind에 맞는 멘트 하나. 미정의 kind는 KeyError로 강제."""
+def pick(kind: str, ctx=None) -> str:
+    """제스처 kind에 맞는 멘트 하나. Claude 가능하면 매번 생성, 아니면 풀."""
     pool = GESTURE_POOLS[kind]
+    # Claude 시도 — 매번 다른 멘트
+    try:
+        from src.brain import conversation, memory
+        try:
+            recent = memory.recent_conversation(minutes=15.0, limit=6)
+        except Exception:
+            recent = None
+        msg = conversation.generate_situational(
+            f"gesture_{kind}",
+            user_name=(getattr(ctx, "user_name", None) if ctx else None),
+            recent_dialog=recent,
+            max_tokens=50,
+        )
+        if msg:
+            return msg
+    except Exception:
+        pass
     return random.choice(pool)

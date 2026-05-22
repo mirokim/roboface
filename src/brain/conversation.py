@@ -126,6 +126,66 @@ class _ClaudeClient:
 _client = _ClaudeClient()
 
 
+def generate_situational(
+    event_kind: str,
+    *,
+    user_name: str | None = None,
+    extra: dict[str, Any] | None = None,
+    recent_dialog: list[dict] | None = None,
+    max_tokens: int = 80,
+) -> str:
+    """이벤트 종류 + 현재 컨텍스트 → 자연스러운 1~2문장 한국어.
+
+    API 키 없으면 빈 문자열 — caller가 fallback 풀 사용.
+    event_kind 예: "reappear", "wave", "hands_up", "chitchat", "gaze_at_me".
+    extra: 이벤트 고유 데이터 (e.g. {"absence_sec": 120}).
+    recent_dialog: 최근 대화 (memory.recent_conversation 결과 형식).
+    """
+    from src.config import ANTHROPIC_API_KEY
+    if not ANTHROPIC_API_KEY:
+        return ""
+
+    now = datetime.now()
+    hour = now.hour
+    if 5 <= hour < 11:
+        period = "아침"
+    elif 11 <= hour < 14:
+        period = "점심"
+    elif 14 <= hour < 18:
+        period = "오후"
+    elif 18 <= hour < 22:
+        period = "저녁"
+    else:
+        period = "심야"
+
+    parts = [
+        f"이벤트: {event_kind}",
+        f"시각: {now.strftime('%H:%M')} ({period})",
+    ]
+    if user_name:
+        parts.append(f"사용자 이름: {user_name}")
+    if extra:
+        parts.append(f"이벤트 데이터: {json.dumps(extra, ensure_ascii=False)}")
+    if recent_dialog:
+        lines = []
+        for r in recent_dialog[-6:]:
+            who = "나" if r["speaker"] == "robot" else "사용자"
+            lines.append(f"  {who}: {r['text']}")
+        parts.append("최근 대화 (괄호는 비언어 행동/이벤트):\n" + "\n".join(lines))
+    parts.append(
+        "\n이 이벤트에 자연스럽게 한 마디. 한 문장 (가끔 두 문장). "
+        "이전에 한 말 절대 반복 X. 캐릭터: 조용하고 사려 깊은 작은 로봇, "
+        "한국어 반말, 이모지 X."
+    )
+    prompt = "\n".join(parts)
+    text = _client.generate(prompt, max_tokens=max_tokens)
+    if text.startswith("[mock]"):
+        return ""
+    # 따옴표/마침표 정리
+    text = text.strip().strip('"').strip("'").strip()
+    return text
+
+
 def generate_proactive_message(trigger_kind: str, context: dict[str, Any]) -> str:
     """능동 멘트 생성."""
     now = datetime.now()
