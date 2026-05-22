@@ -48,11 +48,11 @@ PAN_INVERT = True
 TILT_INVERT = True
 
 # === Breathing — 자연 호흡은 위아래만. PAN은 0으로 (갸우뚱 거슬림). ===
-# 30초 주기 + 진폭 0.25° — 매우 느리고 미세 (들숨 15초 + 날숨 15초)
+# 60초 주기 + 진폭 0.25° — 매우 느리고 미세 (들숨 30초 + 날숨 30초)
 BREATH_TILT_AMP_DEG = 0.25
-BREATH_TILT_PERIOD_SEC = 30.0
+BREATH_TILT_PERIOD_SEC = 60.0
 BREATH_PAN_AMP_DEG = 0.0    # 좌우 호흡 거슬리니까 끔
-BREATH_PAN_PERIOD_SEC = 30.0
+BREATH_PAN_PERIOD_SEC = 60.0
 
 
 def _breathing_offsets(t: float) -> tuple[float, float]:
