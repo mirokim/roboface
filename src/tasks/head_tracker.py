@@ -27,14 +27,14 @@ from src.utils.logger import get_logger
 log = get_logger("head_tracker")
 
 
-# 추적 파라미터
-UPDATE_HZ = 10                 # 초당 갱신 횟수
-SMOOTHING_ALPHA = 0.08         # 0.0(고정) ~ 1.0(즉시). 낮을수록 천천히. 0.25 → 0.08
-PAN_RANGE_DEG = 50             # bbox.x 좌→우 = ±이만큼 회전 (60 → 50)
-TILT_RANGE_DEG = 18            # bbox.y 위→아래 (25 → 18)
+# 추적 파라미터 — 적극적으로 따라가게
+UPDATE_HZ = 15                 # 10 → 15Hz (반응 빠르게)
+SMOOTHING_ALPHA = 0.35         # 0.08 → 0.35 (한 프레임에 더 크게 따라감)
+PAN_RANGE_DEG = 70             # 50 → 70 (회전 범위 넓힘)
+TILT_RANGE_DEG = 30            # 18 → 30
 RETURN_TO_CENTER_AFTER_SEC = 3
-# 한 프레임당 최대 회전량 (도). smoothing이 빠른 동작 만들어도 이 이상은 안 돌게.
-MAX_STEP_DEG = 4.0
+# 한 프레임당 최대 회전량 — 8도까지 허용
+MAX_STEP_DEG = 8.0
 
 # 카메라 마운트 방향에 따른 뒤집기 — 동작 확인하면서 조정 필요
 PAN_INVERT = True   # 카메라가 사람을 화면 왼쪽에 볼 때 → 오른쪽으로 회전?
