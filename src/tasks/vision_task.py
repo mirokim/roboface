@@ -567,6 +567,11 @@ async def run_vision(
                                         if face is not None and ctx is not None:
                                             from src.face.expressions import HAPPY
                                             flash_expression(face, HAPPY, 1.0)
+                                            try:
+                                                from src.brain import stats as _stats
+                                                _stats.on_event("face_recognize")
+                                            except Exception:
+                                                pass
                                             behavior_speaker.say(
                                                 face, ctx,
                                                 behavior_speaker.face_greeting_message(

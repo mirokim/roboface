@@ -18,6 +18,7 @@ import random
 import time
 from datetime import datetime
 
+from src.brain import stats as robot_stats
 from src.brain.state_machine import State, StateContext
 from src.face import expressions as expr
 from src.face.expressions import Expression
@@ -35,7 +36,14 @@ _ELIGIBLE_STATES = (State.IDLE, State.WATCHING)
 
 
 def _select_mood(ctx: StateContext, now_ts: float, hour: int) -> Expression:
-    """현재 상황에 어울리는 베이스 표정."""
+    """현재 상황에 어울리는 베이스 표정. 스탯 영향 우선 반영."""
+    # 1) 스탯 기반 강한 추천 (낮은 스탯이 있으면 우선)
+    suggested = robot_stats.suggested_expression()
+    if suggested:
+        ex = getattr(expr, suggested, None)
+        if ex is not None:
+            return ex
+
     # 밤늦은 시간엔 졸린 게 기본
     night = hour >= 22 or hour < 6
 
@@ -43,7 +51,6 @@ def _select_mood(ctx: StateContext, now_ts: float, hour: int) -> Expression:
     if ctx.user_present and ctx.last_user_seen_at:
         since_seen = now_ts - ctx.last_user_seen_at
         if since_seen < 30:
-            # 처음 만나 살짝 반가운 모드, 가끔 STARSTRUCK
             return random.choices(
                 [expr.HAPPY, expr.CONTENT, expr.STARSTRUCK],
                 weights=[6, 3, 1],

@@ -23,9 +23,9 @@ def test_breathing_oscillates():
     for pan, tilt in samples:
         assert abs(pan) <= head_tracker.BREATH_PAN_AMP_DEG + 1e-6
         assert abs(tilt) <= head_tracker.BREATH_TILT_AMP_DEG + 1e-6
-    # 시간 흐름에 따라 다른 값 (정지 아님)
-    pan_vals = [p for p, _ in samples]
-    assert len(set(round(p, 3) for p in pan_vals)) > 1
+    # 시간 흐름에 따라 다른 값 (정지 아님) — tilt 기준 (PAN amp는 0일 수 있음)
+    tilt_vals = [t for _, t in samples]
+    assert len(set(round(t, 3) for t in tilt_vals)) > 1
 
 
 def test_breathing_period_completes():

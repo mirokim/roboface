@@ -175,12 +175,22 @@ def _build_situation(
     except Exception:
         pass
 
+    # 로봇 자신의 스탯 (Tamagotchi) — 표정 톤에 영향
+    try:
+        from src.brain import stats as robot_stats
+        parts.append(robot_stats.summary_text())
+        parts.append(f"내 컨디션: {robot_stats.mood_label()}")
+    except Exception:
+        pass
+
     parts.append("")
     parts.append(
         "지금 무엇을 할지 도구를 호출해서 결정해. "
         "특별히 말할 거 없으면 do_nothing이 좋음. "
         "이미 최근에 비슷한 말 했으면 또 하지 마. "
-        "오래 앉아있었으면 가끔 쉬자고 말해도 좋아."
+        "오래 앉아있었으면 가끔 쉬자고 말해도 좋아. "
+        "내 컨디션도 멘트 톤에 반영해줘 — 졸리면 늘어진 톤, "
+        "외로우면 살짝 그리워하는 톤, 신나면 활기찬 톤."
     )
     return "\n".join(parts)
 

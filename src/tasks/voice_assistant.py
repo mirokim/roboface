@@ -250,6 +250,11 @@ class VoiceAssistant:
         try:
             from src.brain import memory
             memory.log_robot(reply, kind="voice_reply")
+            try:
+                from src.brain import stats as robot_stats
+                robot_stats.on_event("voice_chat")
+            except Exception:
+                pass
         except Exception as e:
             log.debug(f"conv log 실패: {e}")
 

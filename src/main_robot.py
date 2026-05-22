@@ -14,7 +14,7 @@ import sys
 import time
 
 from src.audio.mic import Microphone, MicCaptureError
-from src.brain import conversation_templates, memory
+from src.brain import conversation_templates, memory, stats as robot_stats
 from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
@@ -36,6 +36,9 @@ from src.tasks.mood_drift import run_mood_drift
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
 from src.tasks.reactive_face import flash_expression
+from src.tasks.daily_recap import run_daily_recap
+from src.tasks.db_cleanup import run_db_cleanup
+from src.tasks.stats_tick import run_stats_tick
 from src.tasks.thermal_state import run_thermal_state
 from src.tasks.vision_task import run_vision
 from src.tasks.voice_assistant import run_voice_assistant
@@ -97,6 +100,9 @@ async def run_robot() -> None:
         asyncio.create_task(run_ambient_motion(servos, ctx), name="ambient_motion"),
         asyncio.create_task(run_mood_drift(face, ctx), name="mood_drift"),
         asyncio.create_task(run_thermal_state(face, perception), name="thermal"),
+        asyncio.create_task(run_stats_tick(ctx), name="stats_tick"),
+        asyncio.create_task(run_daily_recap(face, ctx), name="daily_recap"),
+        asyncio.create_task(run_db_cleanup(), name="db_cleanup"),
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
         asyncio.create_task(ambient.run(), name="ambient"),
@@ -227,6 +233,7 @@ def _handle_sensor_event(
             f"{', 부팅 직후' if first_time else ''})",
             kind="presence_new",
         )
+        robot_stats.on_event("presence_new")
         if absence_sec > 30 or first_time:
             behavior_speaker.say(
                 face, ctx,
@@ -248,14 +255,17 @@ def _handle_sensor_event(
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
         memory.log_user("(손 흔듦)", kind="gesture_wave")
+        robot_stats.on_event("wave")
         asyncio.create_task(_wave_back(ctx, face, servos))
     elif ev.type == SensorEventType.GESTURE_HANDS_UP:
         log.info("🙌 hands up 응답 시작")
         memory.log_user("(양손 만세)", kind="gesture_hands_up")
+        robot_stats.on_event("hands_up")
         asyncio.create_task(_hands_up_back(ctx, face, servos))
     elif ev.type == SensorEventType.GESTURE_HEAD_NOD:
         log.info("👍 head nod 응답 시작")
         memory.log_user("(끄덕임 — yes)", kind="gesture_nod")
+        robot_stats.on_event("nod")
         asyncio.create_task(_simple_reply(ctx, face, "nod"))
     elif ev.type == SensorEventType.GESTURE_HEAD_SHAKE:
         log.info("🙅 head shake 응답 시작")
@@ -264,16 +274,20 @@ def _handle_sensor_event(
     elif ev.type == SensorEventType.GAZE_AT_ME:
         log.info("👀 정면 응시 응답 시작")
         memory.log_user("(사용자가 나를 쳐다봄)", kind="gaze_at_me")
+        robot_stats.on_event("gaze")
         asyncio.create_task(_simple_reply(ctx, face, "gaze"))
-    # MediaPipe Hands 기반 손 제스처 — 카테고리별 단순 reply
+    # MediaPipe Hands 기반 손 제스처 — 카테고리별 단순 reply + stat
     elif ev.type == SensorEventType.HAND_THUMB_UP:
         memory.log_user("(엄지척 👍)", kind="hand_thumb_up")
+        robot_stats.on_event("thumb_up")
         asyncio.create_task(_simple_reply(ctx, face, "thumb_up"))
     elif ev.type == SensorEventType.HAND_THUMB_DOWN:
         memory.log_user("(엄지 다운 👎)", kind="hand_thumb_down")
+        robot_stats.on_event("thumb_down")
         asyncio.create_task(_simple_reply(ctx, face, "thumb_down"))
     elif ev.type == SensorEventType.HAND_VICTORY:
         memory.log_user("(V사인 ✌️)", kind="hand_victory")
+        robot_stats.on_event("victory")
         asyncio.create_task(_simple_reply(ctx, face, "victory"))
     elif ev.type == SensorEventType.HAND_OPEN_PALM:
         memory.log_user("(손바닥 🖐️)", kind="hand_open_palm")
@@ -286,6 +300,7 @@ def _handle_sensor_event(
         asyncio.create_task(_simple_reply(ctx, face, "pointing"))
     elif ev.type == SensorEventType.HAND_ILOVEYOU:
         memory.log_user("(사랑해 🤟)", kind="hand_iloveyou")
+        robot_stats.on_event("iloveyou")
         asyncio.create_task(_simple_reply(ctx, face, "iloveyou"))
 
 
