@@ -41,7 +41,8 @@ MAX_STEP_DEG = 8.0
 # 3) 출력 각도 변화가 0.5도 이내면 서보 명령 자체 skip (PWM 떨림 방지)
 BBOX_SMOOTH_N = 4
 TARGET_DEADZONE_DEG = 1.5
-OUTPUT_DEADZONE_DEG = 0.5
+# 출력 데드존 — breath(0.2~0.4°)보다 작아야 호흡 동작 통과
+OUTPUT_DEADZONE_DEG = 0.15
 
 PAN_INVERT = True
 TILT_INVERT = True
