@@ -194,8 +194,13 @@ def _claude_situational(event_kind: str, ctx: StateContext, extra: dict | None =
 
 def reappear_message(absence_sec: float, ctx: StateContext) -> str:
     """부재 시간 + 시간대 + 이름 조합. Claude가 있으면 매번 새로 생성, 없으면 풀."""
-    # Claude로 시도 — 매번 새 멘트 (반복 X)
-    msg = _claude_situational("reappear", ctx, extra={"absence_sec": int(absence_sec)})
+    if absence_sec >= 600:
+        desc = f"사용자가 {int(absence_sec/60)}분 자리를 비웠다 돌아옴 (오랜만)"
+    elif absence_sec >= 60:
+        desc = f"사용자가 {int(absence_sec/60)}분 정도 자리를 비웠다 돌아옴"
+    else:
+        desc = f"사용자가 잠깐({int(absence_sec)}초) 자리를 비웠다 돌아옴"
+    msg = _claude_situational(desc, ctx, extra={"absence_sec": int(absence_sec)})
     if msg:
         return msg
     # Fallback: 풀
@@ -213,14 +218,16 @@ def reappear_message(absence_sec: float, ctx: StateContext) -> str:
 
 
 def closer_message(ctx: StateContext | None = None) -> str:
-    msg = _claude_situational("got_closer", ctx) if ctx else _claude_situational_noctx("got_closer")
+    desc = "사용자가 로봇 쪽으로 가까이 다가옴"
+    msg = _claude_situational(desc, ctx) if ctx else _claude_situational_noctx(desc)
     if msg:
         return msg
     return _pick_fresh(GOT_CLOSER)
 
 
 def farther_message(ctx: StateContext | None = None) -> str:
-    msg = _claude_situational("got_farther", ctx) if ctx else _claude_situational_noctx("got_farther")
+    desc = "사용자가 로봇에서 멀어짐"
+    msg = _claude_situational(desc, ctx) if ctx else _claude_situational_noctx(desc)
     if msg:
         return msg
     return _pick_fresh(GOT_FARTHER)
@@ -241,8 +248,9 @@ def _claude_situational_noctx(event_kind: str) -> str:
 
 
 def face_greeting_message(name: str) -> str:
+    desc = f"얼굴을 인식해서 {name}이라는 등록된 사람임을 처음 알아챘다 — 이름 부르며 인사"
     try:
-        msg = conversation.generate_situational("face_recognize", user_name=name)
+        msg = conversation.generate_situational(desc, user_name=name)
         if msg:
             return msg
     except Exception:
@@ -260,7 +268,8 @@ _WAVE_SHORT = (
 
 def wave_back_message(ctx: StateContext) -> str:
     """손 흔들기 답례 — Claude 시도, 실패 시 풀."""
-    msg = _claude_situational("wave_reply", ctx)
+    desc = "사용자가 로봇한테 손을 흔들었음 — 답례로 짧게 인사"
+    msg = _claude_situational(desc, ctx)
     if msg:
         return msg
     period = period_for()

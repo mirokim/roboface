@@ -83,21 +83,38 @@ GESTURE_POOLS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Claude한테 넘길 자연어 상황 설명 — 짧은 kind보다 의미 명확
+GESTURE_DESCRIPTIONS: dict[str, str] = {
+    "hands_up": "사용자가 양손을 머리 위로 들어 만세를 함",
+    "nod":      "사용자가 고개를 위아래로 끄덕임 (긍정/yes)",
+    "shake":    "사용자가 고개를 좌우로 흔듦 (부정/no)",
+    "gaze":     "사용자가 로봇을 정면으로 쳐다봄 (시선 전환)",
+    "thumb_up":   "사용자가 엄지를 위로 올려 보임 (👍, 잘했다/좋다)",
+    "thumb_down": "사용자가 엄지를 아래로 내려 보임 (👎, 별로/안좋아)",
+    "victory":    "사용자가 V사인을 보임 (✌️, 승리/기쁨)",
+    "open_palm":  "사용자가 손바닥을 펴서 보임 (🖐️, 하이파이브나 멈춤)",
+    "fist":       "사용자가 주먹을 보임 (👊, 화이팅/결의)",
+    "pointing":   "사용자가 검지로 어딘가를 가리킴 (☝️)",
+    "iloveyou":   "사용자가 ILY 손모양을 보임 (🤟, 사랑해)",
+}
+
+
 def pick(kind: str, ctx=None) -> str:
-    """제스처 kind에 맞는 멘트 하나. Claude 가능하면 매번 생성, 아니면 풀."""
+    """제스처 kind에 맞는 멘트. Claude 우선, 실패 시 풀 fallback."""
     pool = GESTURE_POOLS[kind]
-    # Claude 시도 — 매번 다른 멘트
     try:
         from src.brain import conversation, memory
         try:
             recent = memory.recent_conversation(minutes=15.0, limit=6)
         except Exception:
             recent = None
+        # 사용자 행동 자연어 설명 (Claude 이해 도움)
+        desc = GESTURE_DESCRIPTIONS.get(kind, f"제스처 {kind}")
         msg = conversation.generate_situational(
-            f"gesture_{kind}",
+            desc,
             user_name=(getattr(ctx, "user_name", None) if ctx else None),
             recent_dialog=recent,
-            max_tokens=50,
+            max_tokens=60,
         )
         if msg:
             return msg

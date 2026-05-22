@@ -148,13 +148,13 @@ def generate_situational(
 
     now = datetime.now()
     parts = [
-        f"이벤트: {event_kind}",
+        f"방금 일어난 일: {event_kind}",
         f"시각: {now.strftime('%H:%M')} ({period_ko(now)})",
     ]
     if user_name:
         parts.append(f"사용자 이름: {user_name}")
     if extra:
-        parts.append(f"이벤트 데이터: {json.dumps(extra, ensure_ascii=False)}")
+        parts.append(f"추가 정보: {json.dumps(extra, ensure_ascii=False)}")
     if recent_dialog:
         lines = []
         for r in recent_dialog[-6:]:
@@ -162,9 +162,9 @@ def generate_situational(
             lines.append(f"  {who}: {r['text']}")
         parts.append("최근 대화 (괄호는 비언어 행동/이벤트):\n" + "\n".join(lines))
     parts.append(
-        "\n이 이벤트에 자연스럽게 한 마디. 한 문장 (가끔 두 문장). "
-        "이전에 한 말 절대 반복 X. 캐릭터: 조용하고 사려 깊은 작은 로봇, "
-        "한국어 반말, 이모지 X."
+        "\n이 상황에 자연스럽게 한 마디만. 한 문장 (가끔 두 문장 OK). "
+        "이전에 한 말 절대 반복 X. 의미 없는 추임새도 OK. "
+        "캐릭터: 조용하고 사려 깊은 작은 로봇, 한국어 반말, 이모지 X."
     )
     prompt = "\n".join(parts)
     text = _client.generate(prompt, max_tokens=max_tokens)
