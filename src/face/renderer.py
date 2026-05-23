@@ -15,20 +15,34 @@ import pygame
 
 # Claude가 가끔 이모지 박는데 LCD 폰트가 못 그려서 ☒ 박스로 보임.
 # 발화 시 한 번 strip해서 방어. 메모리 텍스트는 원본 유지 (검색/recall용).
-_EMOJI_RE = re.compile(
-    "["
-    "\U0001F000-\U0001FFFF"   # 이모지 + symbols
-    "\U00002600-\U000027BF"   # misc symbols + dingbats
-    "✀-➿"
-    "️"                   # variation selector
-    "‍"                   # zwj
-    "]+",
-    flags=re.UNICODE,
+# ord 기반 필터 — 정규식 unicode range가 환경 따라 안 잡는 케이스 회피.
+
+_EMOJI_RANGES = (
+    (0x1F000, 0x1FFFF),   # 모든 이모지 영역
+    (0x2600, 0x27BF),     # misc symbols + dingbats
+    (0x2300, 0x23FF),     # misc technical (시계, 화살표 등)
+    (0x2900, 0x297F),     # supplemental arrows
+    (0x2B00, 0x2BFF),     # misc symbols & arrows
 )
+_EMOJI_SINGLES = {0xFE0F, 0x200D}   # VS16, ZWJ
+# strip 후 남는 빈 (), 빈 [] 등 제거
+_EMPTY_BRACKET_RE = re.compile(r"[\(\[\{][\s,·]*[\)\]\}]")
 
 
 def strip_emoji(text: str) -> str:
-    return _EMOJI_RE.sub("", text).strip()
+    out = []
+    for ch in text:
+        c = ord(ch)
+        if c in _EMOJI_SINGLES:
+            continue
+        if any(lo <= c <= hi for lo, hi in _EMOJI_RANGES):
+            continue
+        out.append(ch)
+    cleaned = "".join(out)
+    cleaned = _EMPTY_BRACKET_RE.sub("", cleaned)
+    # 연속 공백 한 개로
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
 
 from src.config import (
     COLOR_BG, COLOR_INDICATOR_REC,
