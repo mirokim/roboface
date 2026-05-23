@@ -272,11 +272,11 @@ _WAVE_SHORT = (
 
 
 def wave_back_message(ctx: StateContext) -> str:
-    """손 흔들기 답례 — Claude 시도, 실패 시 풀."""
-    desc = "사용자가 로봇한테 손을 흔들었음 — 답례로 짧게 인사"
-    msg = _claude_situational(desc, ctx)
-    if msg:
-        return msg
+    """손 흔들기 답례 — 풀에서 즉시.
+
+    Claude API call(1~3초)은 wave 응답 즉시성을 깨므로 사용 X.
+    풀 자체가 다양해서 반복감 적음.
+    """
     period = period_for()
     name_pre = _name_prefix(ctx)
     if random.random() < 0.5:
