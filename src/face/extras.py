@@ -242,7 +242,7 @@ def draw_speech_bubble(
     canvas: pygame.Surface,
     text: str,
     *,
-    font_size: int = 13,
+    font_size: int = 16,
 ) -> None:
     """화면 상단에 말풍선 — 최대 2줄, 넘으면 …로 자름.
 
