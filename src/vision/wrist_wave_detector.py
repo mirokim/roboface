@@ -52,9 +52,9 @@ class WristWaveDetector:
         fps: float = 5.0,
         history_sec: float = 1.5,
         cooldown_sec: float = 2.0,
-        # 어깨너비의 70% 이상 — 진짜 인사용 큰 폭. 책상에서 우연히 손 흔들기/머리
-        # 만지기 같은 작은 모션 제외.
-        min_amplitude_ratio: float = 0.7,
+        # 어깨너비의 55% 이상 — 실측 진짜 wave가 0.56~0.63 범위. 너무 빡세면
+        # 진짜 인사도 못 잡음. false positive는 KP_CONF + zc + max_below로 잡음.
+        min_amplitude_ratio: float = 0.55,
         # 2 사이클 — 좌→우→좌→우→좌.
         min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
@@ -187,9 +187,9 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 손이 어깨 라인 + 어깨너비×0.4(가슴 상단) 이내일 때만 카운트.
-        # → 인사 wave는 손을 올린 자세 — 얼굴 만지기/책상 작업 손은 다 빠짐.
-        max_below = shoulder_width * 0.4
+        # 손이 어깨 라인 + 어깨너비×0.7(가슴 정도) 이내일 때만 카운트.
+        # → 인사 wave는 가슴 이상 — 허리/책상 작업 손은 빠짐.
+        max_below = shoulder_width * 0.7
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
