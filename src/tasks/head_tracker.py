@@ -44,8 +44,10 @@ BBOX_SMOOTH_N = 8
 TARGET_DEADZONE_DEG = 3.0
 # 출력 데드존 — breath OFF 됐으니 크게. 작은 PWM 떨림/노이즈 묻힘.
 OUTPUT_DEADZONE_DEG = 0.5
-# 서보 움직임 직후 settling 시간 — 카메라가 같이 움직이므로 bbox 노이즈 무시.
-SERVO_SETTLE_SEC = 0.25
+# 서보 settle 끔 — 카메라가 머리에 함께 달린 구조에서 settle 동안 perception을
+# 무시하면, 카메라 회전 후 bbox 위치가 크게 점프 → 다음 사이클에 큰 폭 명령 →
+# 양성 피드백 발산. 정상 데드존 + 스무딩이 이미 떨림 흡수.
+SERVO_SETTLE_SEC = 0.0
 
 PAN_INVERT = True
 TILT_INVERT = True
