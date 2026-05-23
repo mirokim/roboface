@@ -42,8 +42,10 @@ MAX_STEP_DEG = 8.0
 # 3) 출력 각도 변화가 0.5도 이내면 서보 명령 자체 skip (PWM 떨림 방지)
 BBOX_SMOOTH_N = 8
 TARGET_DEADZONE_DEG = 3.0
-# 출력 데드존 — breath(0.2~0.4°)보다 작아야 호흡 동작 통과
-OUTPUT_DEADZONE_DEG = 0.15
+# 출력 데드존 — breath OFF 됐으니 크게. 작은 PWM 떨림/노이즈 묻힘.
+OUTPUT_DEADZONE_DEG = 0.5
+# 서보 움직임 직후 settling 시간 — 카메라가 같이 움직이므로 bbox 노이즈 무시.
+SERVO_SETTLE_SEC = 0.25
 
 PAN_INVERT = True
 TILT_INVERT = True
@@ -121,6 +123,8 @@ async def run_head_tracker(
     # 마지막으로 서보에 보낸 각도 (출력 데드존용)
     last_sent_pan = pan_current
     last_sent_tilt = tilt_current
+    # 마지막 서보 명령 시각 — settling 동안 perception 입력 무시
+    last_servo_move_at = 0.0
 
     log.info("head tracker 시작")
 
@@ -133,29 +137,34 @@ async def run_head_tracker(
         if ctx.motion_busy:
             continue
 
+        # 서보 움직임 직후엔 카메라가 같이 흔들려서 bbox가 거짓 신호.
+        # settling 동안엔 새 입력 무시하고 stable target 유지.
+        in_settle = (time.monotonic() - last_servo_move_at) < SERVO_SETTLE_SEC
+
         # 타깃 각도 계산
         if perception.person_present:
-            cx, cy = perception.person_bbox_center
-            # bbox 센터 스무딩 — 매 프레임 흔들리는 노이즈 평균
-            bbox_history.append((cx, cy))
-            avg_cx = sum(p[0] for p in bbox_history) / len(bbox_history)
-            avg_cy = sum(p[1] for p in bbox_history) / len(bbox_history)
+            if not in_settle:
+                cx, cy = perception.person_bbox_center
+                # bbox 센터 스무딩 — 매 프레임 흔들리는 노이즈 평균
+                bbox_history.append((cx, cy))
+                avg_cx = sum(p[0] for p in bbox_history) / len(bbox_history)
+                avg_cy = sum(p[1] for p in bbox_history) / len(bbox_history)
 
-            # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
-            ox = avg_cx - 0.5
-            oy = avg_cy - 0.5
-            if PAN_INVERT:
-                ox = -ox
-            if TILT_INVERT:
-                oy = -oy
-            new_target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
-            new_target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
+                # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
+                ox = avg_cx - 0.5
+                oy = avg_cy - 0.5
+                if PAN_INVERT:
+                    ox = -ox
+                if TILT_INVERT:
+                    oy = -oy
+                new_target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
+                new_target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
 
-            # 타깃 데드존: 작은 변화는 무시 (수렴 안정성)
-            if (abs(new_target_pan - stable_target_pan) > TARGET_DEADZONE_DEG
-                    or abs(new_target_tilt - stable_target_tilt) > TARGET_DEADZONE_DEG):
-                stable_target_pan = new_target_pan
-                stable_target_tilt = new_target_tilt
+                # 타깃 데드존: 작은 변화는 무시 (수렴 안정성)
+                if (abs(new_target_pan - stable_target_pan) > TARGET_DEADZONE_DEG
+                        or abs(new_target_tilt - stable_target_tilt) > TARGET_DEADZONE_DEG):
+                    stable_target_pan = new_target_pan
+                    stable_target_tilt = new_target_tilt
 
             target_pan = stable_target_pan
             target_tilt = stable_target_tilt
@@ -187,6 +196,7 @@ async def run_head_tracker(
             continue
         last_sent_pan = out_pan
         last_sent_tilt = out_tilt
+        last_servo_move_at = time.monotonic()
 
         try:
             servos.set_angles(out_pan, out_tilt)

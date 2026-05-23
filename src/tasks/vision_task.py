@@ -93,7 +93,8 @@ async def run_vision(
         # pose 모드 score 분포가 매우 낮음 (0.1~0.3) — 더 너그럽게 0.05
         min_confidence=0.05 if VISION_MODE == "pose" else 0.5,
         # pose 모드는 score 깜빡임으로 LEFT 토글 잦음 → 20초로 완화
-        away_timeout_sec=20.0 if VISION_MODE == "pose" else 5.0,
+        # detect 모드도 자세 변화/잠깐 사각 흡수 위해 10초로 늘림
+        away_timeout_sec=20.0 if VISION_MODE == "pose" else 10.0,
         # 신속 인지 — 2프레임이면 PRESENT 확정 (10fps에서 200ms)
         confirm_frames=2 if VISION_MODE == "pose" else 3,
     )
