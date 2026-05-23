@@ -5,11 +5,30 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 
 import pygame
+
+
+# Claude가 가끔 이모지 박는데 LCD 폰트가 못 그려서 ☒ 박스로 보임.
+# 발화 시 한 번 strip해서 방어. 메모리 텍스트는 원본 유지 (검색/recall용).
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FFFF"   # 이모지 + symbols
+    "\U00002600-\U000027BF"   # misc symbols + dingbats
+    "✀-➿"
+    "️"                   # variation selector
+    "‍"                   # zwj
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def strip_emoji(text: str) -> str:
+    return _EMOJI_RE.sub("", text).strip()
 
 from src.config import (
     COLOR_BG, COLOR_INDICATOR_REC,
@@ -64,7 +83,8 @@ class FaceState:
         """
         from src.config import BEHAVIOR
         with self._lock:
-            self.speech_text = text
+            # 이모지 strip — LCD 폰트에 없는 글리프는 ☒ 박스로 뜸
+            self.speech_text = strip_emoji(text) or text
             hold = max(
                 duration_sec + BEHAVIOR.speech_extra_hold_sec,
                 BEHAVIOR.min_speech_display_sec,
