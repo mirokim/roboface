@@ -45,7 +45,7 @@ class WristWaveDetector:
     호출. 같은 인스턴스가 좌/우 손목 두 시계열 동시 관리.
     """
 
-    KP_CONF_THRESHOLD = 0.30   # 노이즈 차단 — 분명한 wrist만 카운트
+    KP_CONF_THRESHOLD = 0.20   # IMX500 pose의 wrist conf 분포 (0.1~0.4)에 맞춤
 
     def __init__(
         self,
