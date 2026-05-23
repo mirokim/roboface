@@ -352,7 +352,8 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     msg = await loop.run_in_executor(
         None, lambda: conversation_templates.pick("hands_up", ctx),
     )
-    ctx.transition(State.GREETING, face)
+    # say() 먼저 호출 — busy_state(GREETING)이면 자기 자신을 막아버림.
+    # 성공 시 그때서야 GREETING 전이.
     speech_task = behavior_speaker.say(
         face, ctx, msg,
         kind="hands_up_reply",
@@ -360,10 +361,8 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
         expression=STARSTRUCK,
     )
     if speech_task is None:
-        ctx.transition(
-            State.WATCHING if ctx.user_present else State.IDLE, face,
-        )
         return
+    ctx.transition(State.GREETING, face)
     await asyncio.sleep(0)
     try:
         if servos is not None:
@@ -397,20 +396,18 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     greeting = await loop.run_in_executor(
         None, behavior_speaker.wave_back_message, ctx,
     )
-    # GREETING 상태로 전이 후 say() 호출 — 단일 통로로 발화/로그/cooldown
-    ctx.transition(State.GREETING, face)
+    # say() 먼저 — busy_state(GREETING) gate가 자기 자신을 막아버리므로
+    # state 전이는 say() 성공 후에. (이전 버전이 이 순서가 뒤바뀌어 있어 wave가
+    # 매번 응답 없이 즉시 종료됨 — 실제 발화/댄스 한 번도 실행 X.)
     speech_task = behavior_speaker.say(
         face, ctx, greeting,
         kind="wave_reply",
-        cooldown_sec=10.0,    # kind별 (5분은 _GREETING_KINDS가 별도 적용)
+        cooldown_sec=10.0,    # kind별 짧은 cooldown
         expression=HAPPY,
     )
-    # say()가 게이트로 막혔으면 (quiet hours / 인사 cooldown) 그냥 상태만 복귀
     if speech_task is None:
-        ctx.transition(
-            State.WATCHING if ctx.user_present else State.IDLE, face,
-        )
-        return
+        return   # quiet hours / cooldown — state 안 건드렸으니 복귀 불필요
+    ctx.transition(State.GREETING, face)
     await asyncio.sleep(0)  # bubble 즉시 노출
     try:
         if servos is not None:
