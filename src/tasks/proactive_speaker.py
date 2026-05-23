@@ -59,11 +59,23 @@ async def fire_trigger(
                 _wrap(poses.shake(servos, times=1))
             )
 
-    # 멘트 결정
-    if trig.suggested_message:
-        message = trig.suggested_message
-    else:
-        message = conversation.generate_proactive_message(trig.kind, trig.context)
+    # 멘트 결정 — API 키 있으면 Claude 우선 (풀은 fallback).
+    # 컨텍스트(work_minutes/시간대/이름 등)를 살려 풍부한 멘트 가능.
+    from src.config import ANTHROPIC_API_KEY
+    message = ""
+    if ANTHROPIC_API_KEY:
+        try:
+            loop = asyncio.get_running_loop()
+            message = await loop.run_in_executor(
+                None,
+                lambda: conversation.generate_proactive_message(
+                    trig.kind, trig.context,
+                ),
+            )
+        except Exception as e:
+            log.debug(f"{trig.kind}: Claude 멘트 생성 실패 — fallback: {e}")
+    if not message:
+        message = trig.suggested_message or ""
     if not message:
         log.debug(f"{trig.kind}: 빈 멘트, skip")
         if motion_task is not None:

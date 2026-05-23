@@ -131,6 +131,20 @@ async def api_state(request):
     ctx: StateContext = app["ctx"]
     perception: PerceptionState = app["perception"]
     s = robot_stats.get()
+    # API 사용량 (Claude 호출 비용)
+    try:
+        from src.brain.conversation import _usage
+        usage_summary = {
+            "calls": _usage.calls,
+            "image_attaches": _usage.image_attaches,
+            "input_tokens": _usage.input_tokens,
+            "cache_read_tokens": _usage.cache_read_tokens,
+            "output_tokens": _usage.output_tokens,
+            "total_usd": round(_usage.estimated_usd(), 4),
+            "hourly_usd": round(_usage.hourly_estimate_usd(), 3),
+        }
+    except Exception:
+        usage_summary = None
     return web.json_response({
         "state": ctx.state.value,
         "user_present": ctx.user_present,
@@ -145,6 +159,7 @@ async def api_state(request):
             "curiosity": round(s.curiosity, 1),
             "label": robot_stats.mood_label(),
         },
+        "api_usage": usage_summary,
     })
 
 
