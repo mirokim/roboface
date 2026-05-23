@@ -53,10 +53,11 @@ class WristWaveDetector:
         history_sec: float = 1.5,
         cooldown_sec: float = 2.0,   # 짧게 — 연속 wave 검출 가능
         # 진폭은 어깨너비의 배수 — 거리 무관.
-        # 키보드/마우스 작업 손 진동과 구분 위해 0.35 (어깨너비 35% 이상).
-        min_amplitude_ratio: float = 0.35,
-        # 1.5 사이클 (좌→우→좌→우) 정도. false positive와 사용성의 균형.
-        min_zero_crossings: int = 3,
+        # 책상 작업/우연한 손 이동과 진짜 인사 구분 — 어깨너비 50% 이상.
+        min_amplitude_ratio: float = 0.5,
+        # 2 사이클 — 진짜 인사 wave는 좌→우→좌→우→좌 정도 명확함.
+        # 1.5 사이클(zc=3)은 책상에서 손 위치 한 번 옮긴 것도 통과 가능 → false positive.
+        min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
         min_eval_frames: int = 5,   # 6 → 5 (감지 빨리)
     ) -> None:
