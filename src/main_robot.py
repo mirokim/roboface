@@ -417,7 +417,8 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     try:
         if servos is not None:
             async with motion_busy_scope(ctx):
-                await poses.dance(servos, face, bpm=100, beats=4)
+                # 부드러운 인사 동작 — 살짝 위로 들었다 끄덕 (dance는 격함)
+                await poses.greeting(servos)
         else:
             await asyncio.sleep(1.5)
         try:
