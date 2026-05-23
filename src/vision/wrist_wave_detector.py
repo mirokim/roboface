@@ -53,10 +53,10 @@ class WristWaveDetector:
         history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
         # 진폭은 어깨너비의 배수 — 거리 무관.
-        # 키보드/마우스 작업 손 진동과 구분 위해 0.4로 상향 (어깨너비 40% 이상)
-        min_amplitude_ratio: float = 0.4,
-        # 진짜 인사용 wave는 최소 2사이클 — false positive 차단 위해 4로 상향
-        min_zero_crossings: int = 4,
+        # 키보드/마우스 작업 손 진동과 구분 위해 0.35 (어깨너비 35% 이상).
+        min_amplitude_ratio: float = 0.35,
+        # 1.5 사이클 (좌→우→좌→우) 정도. false positive와 사용성의 균형.
+        min_zero_crossings: int = 3,
         max_zero_crossings: int = 16,
         min_eval_frames: int = 5,   # 6 → 5 (감지 빨리)
     ) -> None:
@@ -187,10 +187,9 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 책상 작업(키보드/마우스) 손 진동을 wave로 오인하지 않게 강화.
-        # 손목이 어깨에서 어깨너비의 30% 이내 아래 (즉 거의 어깨 위 또는 가슴 상단)
-        # 일 때만 카운트. 인사 wave는 손을 든 자세이므로 OK.
-        max_below = shoulder_width * 0.3
+        # 손이 어깨너비×1.0(가슴~명치) 아래까지는 카운트. 그 이상 아래(허리)는 reject.
+        # → 키보드/마우스 작업 손은 통상 허리 근처라 빠짐. 인사 wave는 가슴~머리 OK.
+        max_below = shoulder_width * 1.0
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
