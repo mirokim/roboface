@@ -368,15 +368,10 @@ async def run_vision(
                         sorted_w = sorted(dist_window)
                         smoothed = sorted_w[len(sorted_w) // 2]   # median
                         delta = smoothed - last_distance_for_comment
+                        # 거리 변동은 conversation_log에 안 쌓음 — bbox 노이즈로
+                        # 자주 ±60cm 흔들려서 Claude 컨텍스트 오염시켜 "왔다 갔다"
+                        # 인상 줌. 실제 발화한 경우만 say() 내부에서 log_robot됨.
                         if delta < -60:
-                            try:
-                                from src.brain import memory as _mem
-                                _mem.log_user(
-                                    f"(가까이 옴 — {int(smoothed)}cm)",
-                                    kind="distance_closer",
-                                )
-                            except Exception:
-                                pass
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(ctx),
@@ -385,14 +380,6 @@ async def run_vision(
                             )
                             last_distance_for_comment = smoothed
                         elif delta > 60:
-                            try:
-                                from src.brain import memory as _mem
-                                _mem.log_user(
-                                    f"(멀어짐 — {int(smoothed)}cm)",
-                                    kind="distance_farther",
-                                )
-                            except Exception:
-                                pass
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.farther_message(ctx),
