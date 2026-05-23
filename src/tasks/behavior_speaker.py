@@ -46,13 +46,14 @@ def say(
     kind: str,
     cooldown_sec: float = DEFAULT_COOLDOWN_SEC,
     expression: Expression | None = None,
+    bypass_quiet: bool = False,
 ) -> "asyncio.Task | None":
     """행동 멘트 발화 시도. 발화 시 speech task 반환, skip 시 None.
 
     Gates:
     - text 빈 문자열
     - busy state (TALKING/LISTENING/GREETING)
-    - quiet hours
+    - quiet hours (bypass_quiet=True면 우회 — 사용자 능동 제스처 응답용)
     - kind별 cooldown
     - 인사류(_GREETING_KINDS): 마지막 인사 후 5분 안엔 skip
     """
@@ -61,7 +62,7 @@ def say(
     if _busy_state(ctx):
         log.debug(f"say skip [{kind}]: busy state ({ctx.state})")
         return None
-    if _is_quiet_hours():
+    if _is_quiet_hours() and not bypass_quiet:
         log.debug(f"say skip [{kind}]: quiet hours")
         return None
     now = time.time()

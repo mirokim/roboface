@@ -359,6 +359,7 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
         kind="hands_up_reply",
         cooldown_sec=10.0,
         expression=STARSTRUCK,
+        bypass_quiet=True,   # 사용자 능동 제스처 — 새벽이라도 응답
     )
     if speech_task is None:
         return
@@ -404,6 +405,7 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
         kind="wave_reply",
         cooldown_sec=10.0,    # kind별 짧은 cooldown
         expression=HAPPY,
+        bypass_quiet=True,    # 사용자 능동 제스처 — 새벽이라도 응답
     )
     if speech_task is None:
         return   # quiet hours / cooldown — state 안 건드렸으니 복귀 불필요
