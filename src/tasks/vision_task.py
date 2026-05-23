@@ -15,7 +15,9 @@ from src.sensors.base import SensorEvent, SensorEventType
 from src.tasks import behavior_speaker
 from src.tasks.reactive_face import flash_expression
 from src.utils.logger import get_logger
-from src.vision.emotion_mirror import EMOTION_SMILE, EmotionMirror
+from src.vision.emotion_mirror import (
+    EMOTION_SAD, EMOTION_SMILE, EMOTION_SURPRISED, EmotionMirror,
+)
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision import debug_snapshot, photo_memory
@@ -501,10 +503,17 @@ async def run_vision(
                     if emotion_mirror is not None and face is not None:
                         emotion = emotion_mirror.process(frame, effective_bbox)
                         if emotion == EMOTION_SMILE:
-                            # 사용자가 웃으면 같이 웃음 (짧게)
                             from src.face.expressions import HAPPY
                             flash_expression(face, HAPPY, 1.5)
                             cur_emotion = "smile"
+                        elif emotion == EMOTION_SURPRISED:
+                            from src.face.expressions import SURPRISED
+                            flash_expression(face, SURPRISED, 1.5)
+                            cur_emotion = "surprised"
+                        elif emotion == EMOTION_SAD:
+                            from src.face.expressions import SAD
+                            flash_expression(face, SAD, 1.5)
+                            cur_emotion = "sad"
                         else:
                             cur_emotion = "neutral"
 

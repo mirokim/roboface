@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from src.vision.emotion_mirror import (
-    EMOTION_NEUTRAL, EMOTION_SMILE, EmotionMirror,
+    EMOTION_NEUTRAL, EMOTION_SAD, EMOTION_SMILE, EMOTION_SURPRISED, EmotionMirror,
 )
 
 
@@ -64,4 +64,4 @@ def test_processes_arbitrary_frame_without_crashing():
     noise = rng.integers(0, 255, (240, 320, 3), dtype=np.uint8)
     result = em.process(noise, (0.1, 0.05, 0.9, 0.95))
     # 결과는 None 또는 valid emotion
-    assert result in (None, EMOTION_SMILE)
+    assert result in (None, EMOTION_SMILE, EMOTION_SURPRISED, EMOTION_SAD)
