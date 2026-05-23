@@ -45,18 +45,17 @@ class WristWaveDetector:
     호출. 같은 인스턴스가 좌/우 손목 두 시계열 동시 관리.
     """
 
-    KP_CONF_THRESHOLD = 0.15   # 손목/어깨 keypoint 최소 신뢰도 — 노이즈 차단 강화
+    KP_CONF_THRESHOLD = 0.30   # 노이즈 차단 — 분명한 wrist만 카운트
 
     def __init__(
         self,
         fps: float = 5.0,
         history_sec: float = 1.5,
-        cooldown_sec: float = 2.0,   # 짧게 — 연속 wave 검출 가능
-        # 진폭은 어깨너비의 배수 — 거리 무관.
-        # 책상 작업/우연한 손 이동과 진짜 인사 구분 — 어깨너비 50% 이상.
-        min_amplitude_ratio: float = 0.5,
-        # 2 사이클 — 진짜 인사 wave는 좌→우→좌→우→좌 정도 명확함.
-        # 1.5 사이클(zc=3)은 책상에서 손 위치 한 번 옮긴 것도 통과 가능 → false positive.
+        cooldown_sec: float = 2.0,
+        # 어깨너비의 70% 이상 — 진짜 인사용 큰 폭. 책상에서 우연히 손 흔들기/머리
+        # 만지기 같은 작은 모션 제외.
+        min_amplitude_ratio: float = 0.7,
+        # 2 사이클 — 좌→우→좌→우→좌.
         min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
         min_eval_frames: int = 5,   # 6 → 5 (감지 빨리)
@@ -188,9 +187,9 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 손이 어깨너비×1.0(가슴~명치) 아래까지는 카운트. 그 이상 아래(허리)는 reject.
-        # → 키보드/마우스 작업 손은 통상 허리 근처라 빠짐. 인사 wave는 가슴~머리 OK.
-        max_below = shoulder_width * 1.0
+        # 손이 어깨 라인 + 어깨너비×0.4(가슴 상단) 이내일 때만 카운트.
+        # → 인사 wave는 손을 올린 자세 — 얼굴 만지기/책상 작업 손은 다 빠짐.
+        max_below = shoulder_width * 0.4
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
