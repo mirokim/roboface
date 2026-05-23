@@ -136,6 +136,10 @@ async def run_vision(
     last_distance_for_comment: float | None = None
     dist_window: deque[float] = deque(maxlen=8)
     last_diag_log_at = 0.0
+    # fps 프로파일링 — 매 N프레임마다 처리 시간/fps 로그
+    _fps_frame_count = 0
+    _fps_window_start = time.time()
+    _fps_log_every = 100   # 100 프레임마다 한 번
     # 포토 메모리 — 30~60분 랜덤 간격으로 1회 캡처. 시작 후 첫 캡처는 3분 뒤.
     import random as _r
     next_snapshot_at = time.time() + 180.0
@@ -152,6 +156,19 @@ async def run_vision(
         person_filter_conf = 0.05 if VISION_MODE == "pose" else 0.5
 
         async for detections in cam.stream():
+            # fps 카운터 — 매 _fps_log_every 프레임마다 처리 fps 출력
+            _fps_frame_count += 1
+            if _fps_frame_count >= _fps_log_every:
+                _now = time.time()
+                _elapsed = _now - _fps_window_start
+                if _elapsed > 0:
+                    log.info(
+                        f"vision fps: {_fps_frame_count / _elapsed:.1f} "
+                        f"({_fps_frame_count}프레임 / {_elapsed:.1f}초)"
+                    )
+                _fps_frame_count = 0
+                _fps_window_start = _now
+
             events = detector.process(detections)
             for ev in events:
                 emit_event(ev)

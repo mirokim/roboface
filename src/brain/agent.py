@@ -241,12 +241,53 @@ def _time_hint(now: datetime) -> str | None:
     return None
 
 
+def _build_situation_prefix(ctx: StateContext) -> str:
+    """변화가 드문 컨텍스트 — cache_control 적용 대상.
+
+    사용자 이름, 학습된 facts, 오늘 첫 등장 시각만 포함. 이것들은 자정/학습/등장
+    같은 드문 이벤트에만 변하므로 prompt cache(5분 TTL)에 잘 들어감.
+    """
+    name = ctx.user_name or "(미등록)"
+    parts = [f"사용자 이름: {name}"]
+
+    if ctx.first_seen_today_at:
+        first_seen = datetime.fromtimestamp(ctx.first_seen_today_at)
+        parts.append(f"오늘 처음 본 시각: {first_seen.strftime('%H:%M')}")
+
+    try:
+        facts = memory.all_facts(limit=20)
+        if facts:
+            fact_lines = [f"  - {f['key']}: {f['value']}" for f in facts]
+            parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(fact_lines))
+    except Exception:
+        pass
+
+    return "\n".join(parts)
+
+
 def _build_situation(
     ctx: StateContext,
     perception: PerceptionState | None,
     work_minutes: float | None,
     face: FaceState | None = None,
 ) -> str:
+    """전체 컨텍스트 (단일 문자열). 호환성 유지 — 일부 caller가 직접 사용.
+
+    agent _tick은 prefix/suffix 분리해 cache 활용. _build_situation은 두 부분
+    합쳐 반환 → 기존 caller(테스트 포함) 동일 동작.
+    """
+    return _build_situation_prefix(ctx) + "\n" + _build_situation_suffix(
+        ctx, perception, work_minutes, face,
+    )
+
+
+def _build_situation_suffix(
+    ctx: StateContext,
+    perception: PerceptionState | None,
+    work_minutes: float | None,
+    face: FaceState | None = None,
+) -> str:
+    """매 tick 변하는 컨텍스트 — cache 적용 X."""
     now = datetime.now()
     now_ts = now.timestamp()
     period = period_ko(now)
@@ -255,12 +296,10 @@ def _build_situation(
             if perception and perception.temperature_c is not None else None)
     dist = (perception.person_distance_cm
             if perception and perception.person_distance_cm > 0 else None)
-    name = ctx.user_name or "(미등록)"
     recent = _gather_recent_messages()
 
     parts = [
         f"현재 시각: {now.strftime('%Y-%m-%d %H:%M')} ({period})",
-        f"사용자 이름: {name}",
         f"사용자 존재: {'있음' if ctx.user_present else '없음'}",
         f"내 상태: {ctx.state.value}",
     ]
@@ -329,10 +368,7 @@ def _build_situation(
         if activity_parts:
             parts.append("활동: " + ", ".join(activity_parts))
 
-    # 오늘 첫 등장 시각
-    if ctx.first_seen_today_at:
-        first_seen = datetime.fromtimestamp(ctx.first_seen_today_at)
-        parts.append(f"오늘 처음 본 시각: {first_seen.strftime('%H:%M')}")
+    # (오늘 첫 등장 시각은 prefix에 — cache 활용)
 
     # 사용자가 잠시 자리 비웠는지 (현재 부재 중일 때만 의미 있음)
     if not ctx.user_present and ctx.last_user_seen_at:
@@ -368,14 +404,7 @@ def _build_situation(
 
     parts.append(f"최근 대화:\n{recent}")
 
-    # 사용자에 대해 학습한 사실 — 장기 기억
-    try:
-        facts = memory.all_facts(limit=20)
-        if facts:
-            fact_lines = [f"  - {f['key']}: {f['value']}" for f in facts]
-            parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(fact_lines))
-    except Exception:
-        pass
+    # (학습된 facts는 prefix에 — cache 활용)
 
     # 시간대 힌트 — 식사/취침 시간대 명시 (agent가 자연스럽게 챙기게)
     hint = _time_hint(now)
@@ -471,29 +500,42 @@ class RobotAgent:
                     work_min = memory.current_work_duration(sid) / 60
                 except Exception:
                     pass
-        situation = _build_situation(
+        prefix = _build_situation_prefix(self.ctx)
+        suffix = _build_situation_suffix(
             self.ctx, self.perception, work_min, face=self.face,
         )
         loop = asyncio.get_running_loop()
 
-        # 이미지 첨부 여부 결정 + 인코딩 (sync — 무거우면 executor로 옮길 수도)
         image_b64 = self._maybe_encode_frame()
 
-        # multi-turn: 정보 도구(recall)는 결과 회신 후 다시 결정.
-        # 행동 도구는 즉시 실행하고 loop 종료.
-        messages: list[dict] | None = None
-        prompt: str | None = situation
-        # 첫 round에만 이미지 첨부 (이후 round는 tool_result 회신).
-        first_image: str | None = image_b64
+        # content blocks: [image?] + [prefix cached] + [suffix]
+        # prefix에 cache_control 붙여 5분 TTL 안에 cache hit. suffix는 매번 새로움.
+        content: list[dict] = []
+        if image_b64:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": image_b64,
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": prefix,
+            "cache_control": {"type": "ephemeral"},
+        })
+        content.append({"type": "text", "text": suffix})
+
+        messages: list[dict] = [{"role": "user", "content": content}]
+
         for round_idx in range(_MAX_AGENT_ROUNDS):
             actions, full_messages = await loop.run_in_executor(
                 None,
-                lambda p=prompt, m=messages, img=first_image:
-                    conversation._client.generate_with_tools(
-                        p or "", _TOOLS, messages=m, image_b64=img,
-                    ),
+                lambda m=messages: conversation._client.generate_with_tools(
+                    "", _TOOLS, messages=m,
+                ),
             )
-            first_image = None   # 두 번째 round부터는 이미지 다시 X
             if not actions:
                 return
 
@@ -570,11 +612,18 @@ class RobotAgent:
         if not changed and not forced:
             return None
 
-        # 인코딩 시도
+        # 인코딩 시도 — frame을 copy해서 다른 task의 in-place 수정으로부터 격리
         try:
             from src.brain.image_encoding import encode_jpeg_b64
+            frame_snapshot = self.perception.last_frame
+            # numpy면 .copy(), 그 외 객체는 그대로 (잠재적 위험은 cv2 buffer 정도 — 보통 안전)
+            if hasattr(frame_snapshot, "copy"):
+                try:
+                    frame_snapshot = frame_snapshot.copy()
+                except Exception:
+                    pass
             b64 = encode_jpeg_b64(
-                self.perception.last_frame,
+                frame_snapshot,
                 quality=BEHAVIOR.agent_vision_jpeg_quality,
                 max_side_px=BEHAVIOR.agent_vision_max_side_px,
             )

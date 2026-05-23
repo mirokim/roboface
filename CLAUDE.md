@@ -54,11 +54,12 @@ src/
 ├── brain/                 ← 두뇌
 │   ├── state_machine.py   ← State(IDLE/WATCHING/GREETING/TALKING/ALERTING/LISTENING) + StateContext
 │   ├── perception.py      ← PerceptionState (사용자 위치, 온도)
-│   ├── memory.py          ← SQLite (work_sessions, conversation_log, env_log…) WAL 모드
+│   ├── memory.py          ← SQLite (work_sessions, conversation_log, learned_facts, env_log…) WAL 모드
 │   ├── triggers.py        ← ProactiveTrigger 평가기 + TRIGGER_EXPRESSIONS SSOT
-│   ├── conversation.py    ← Claude API 래퍼 + SYSTEM_PROMPT
+│   ├── conversation.py    ← Claude API 래퍼 + SYSTEM_PROMPT (image 첨부 지원)
 │   ├── conversation_templates.py  ← 제스처 즉시 응답 멘트 SSOT (hands_up/nod/shake/gaze)
-│   ├── agent.py           ← RobotAgent (Claude tool-use 자율 결정)
+│   ├── agent.py           ← RobotAgent (Claude tool-use + multi-turn + vision)
+│   ├── image_encoding.py  ← numpy RGB → JPEG base64 (agent vision용)
 │   └── time_of_day.py     ← 시간대(morning/lunch/afternoon/evening/late) SSOT
 ├── vision/                ← AI Camera 처리
 │   ├── camera.py          ← IMX500 wrapper (VISION_MODE=detect/pose)
@@ -87,16 +88,17 @@ src/
 │   ├── behavior_speaker.py   ← 이벤트 즉시 멘트 (wave_back/reappear)
 │   ├── voice_assistant.py    ← wake → STT → Claude → TTS
 │   ├── work_tracker.py       ← 작업 세션 + 휴식 임계
-│   ├── posture_monitor.py    ← 자세 감시
+│   ├── posture_monitor.py    ← 자세 감시 + perception.posture_category 갱신
+│   ├── activity_monitor.py   ← 60초 윈도우 keypoint 변동량 → activity_level
 │   ├── ambient_listener.py   ← 주변 STT (현재 MockSTT)
 │   ├── schedule_extractor.py ← 대화에서 일정 추출 → ThinkTank
 │   ├── journal_writer.py     ← 저널 동기화
-│   ├── vision_task.py        ← 카메라 메인 루프
-│   ├── head_tracker.py       ← 서보로 머리 추적
+│   ├── vision_task.py        ← 카메라 메인 루프 (gaze_target/frame cache 포함)
+│   ├── head_tracker.py       ← 서보로 머리 추적 + perception.head_pan/tilt 갱신
 │   ├── eye_tracker.py        ← 시선 동공 이동
 │   ├── reactive_face.py      ← flash_expression
 │   ├── audio_reactive.py     ← 박수/음악 → 표정/모션
-│   ├── thermal_state.py      ← 온도 → 떨림/땀
+│   ├── thermal_state.py      ← 온도 → 떨림/땀 + face.env_* 미러
 │   ├── mood_drift.py         ← 장기 기분 드리프트
 │   └── idle_animation.py     ← idle gaze + ambient motion
 ├── integrations/thinktank/   ← ThinkTank(외부 시스템) 통합
@@ -114,17 +116,19 @@ src/
 | 무엇 | 어디 | 비고 |
 |---|---|---|
 | 모드/핀맵/API 키 | [src/config.py](src/config.py) | 환경변수 우선 |
-| 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |
+| 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임, agent vision 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |
 | 입 모양 ↔ 음량 임계 | `BehaviorConfig.mouth_amp_thresholds` | mouth.py/tts.py 공유 — [src/face/mouth.py](src/face/mouth.py) `shape_for_amp()` |
 | 표정 정의 | [src/face/expressions.py](src/face/expressions.py) `EXPRESSIONS_BY_NAME` | agent enum 자동 도출 |
 | 상태 → 기본 표정 | [src/brain/state_machine.py](src/brain/state_machine.py) `_DEFAULT_EXPRESSIONS` | |
 | 트리거 → 표정 | [src/brain/triggers.py](src/brain/triggers.py) `TRIGGER_EXPRESSIONS` | 누락 시 `expression_for()`가 KeyError |
 | 제스처 응답 멘트 | [src/brain/conversation_templates.py](src/brain/conversation_templates.py) `GESTURE_POOLS` | hands_up/nod/shake/gaze. wave는 behavior_speaker가 SSOT |
 | 시간대 분류 | [src/brain/time_of_day.py](src/brain/time_of_day.py) `period_for()` | morning/lunch/afternoon/evening/late |
-| 시스템 프롬프트(캐릭터 보이스) | [src/brain/conversation.py](src/brain/conversation.py) `SYSTEM_PROMPT` | |
-| 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing |
+| 시스템 프롬프트(캐릭터 보이스) | [src/brain/conversation.py](src/brain/conversation.py) `SYSTEM_PROMPT` + [src/brain/agent.py](src/brain/agent.py) `_AGENT_SYSTEM` | agent용은 후자가 우선 |
+| 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing/**recall**/**remember_fact** |
+| 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame |
+| 시간대 힌트 (식사/오후 슬럼프 등) | [src/brain/agent.py](src/brain/agent.py) `_time_hint()` | agent 프롬프트에 주입 |
 | 센서 이벤트 enum | [src/sensors/base.py](src/sensors/base.py) `SensorEventType` | |
-| DB 스키마 | [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL` | WAL 모드 |
+| DB 스키마 | [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL` | WAL 모드. 테이블: work_sessions, conversation_log, proactive_log, schedules, env_log, user_patterns, face_snapshots, command_queue, **learned_facts** |
 
 ---
 
@@ -133,17 +137,35 @@ src/
 ### (a) 자율 결정 — Claude **에이전트**가 매 15초마다 도구 호출
 [src/brain/agent.py](src/brain/agent.py) `RobotAgent`가 ANTHROPIC_API_KEY 있을 때만 활성.
 
-도구:
+행동 도구:
 - `speak(text, expression?)` — 사용자에게 한두 문장 발화 (90초 쿨다운)
 - `set_expression(expression)` — 표정만 변경 (22종 중 1)
 - `dance(beats?, bpm?)` — 짧은 댄스
 - `do_nothing()` — 침묵 유지 (기본은 이게 정답, 5번 중 3-4번)
+- `remember_fact(key, value)` — 사용자에 대해 알게 된 사실 저장 (learned_facts 테이블)
+
+정보 도구 (multi-turn — 결과 받고 행동 다시 결정):
+- `recall(keyword, days?)` — conversation_log 검색. 오래된 대화 회상용. 최대 3 round 안에 행동 도구 호출해야 종료.
+
+이미지 첨부 (agent vision):
+- `BehaviorConfig.agent_vision_enabled=True` + 사용자 표정/활동성/시선 변화 시
+  또는 max_interval_sec(10분)마다 한 번 — perception.last_frame을 JPEG로 인코딩해 첨부.
+- min_interval_sec(60초) 안엔 무조건 skip. 비용 절감.
 
 표정 이름은 `EXPRESSIONS_BY_NAME` 키 (대소문자 무관). 새 표정 추가하면 agent 도구
 스키마가 자동으로 따라옴 (`_EXPRESSION_NAMES` 도출).
 
 캐릭터 보이스: [src/brain/agent.py](src/brain/agent.py) `_AGENT_SYSTEM` 프롬프트 참조.
-조용함·사려깊음·반말·이모지 X·1-2문장.
+조용함·사려깊음·반말·이모지 X·1-2문장. 자기 머리/표정/카메라 일체 인식.
+
+컨텍스트(매 tick `_build_situation`):
+- 시각/사용자 이름/존재/거리/온도, 오늘 첫 등장/누적 작업, 최근 트리거
+- 사용자 표정/시선 타깃/활동성/자세 (활동 추론 신호)
+- 내 상태/표정/머리 방향
+- 학습된 facts (최근 20개)
+- 시간대 힌트 (점심/오후 슬럼프 등)
+- 최근 대화 로그
+- 24h 표정 통계 + 로봇 컨디션
 
 ### (b) 외부 수동 제어 — `scripts/robot_cli.py`
 시뮬레이터/로봇이 떠 있을 때 별도 프로세스에서 명령. (Phase 5.2에서 작성)

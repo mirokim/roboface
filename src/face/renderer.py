@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -40,14 +41,20 @@ class FaceState:
     speech_text: str | None = None
     speech_until: float = 0.0
 
+    # 동시 변경 방지용 — apply_expression/show_speech 같이 여러 attr을 묶어
+    # 갱신하는 메서드 보호. 단일 attr 직접 접근(face.recording = True 등)은
+    # lock 안 잡음 (Python GIL로 atomic 근사). RLock — 같은 task nested OK.
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+
     def apply_expression(self, expr: Expression) -> None:
-        # 표정이 실제로 바뀌면 깜빡임으로 자연스럽게 전환
-        changed = self.expression.name != expr.name
-        self.expression = expr
-        self.eye_state.shape = expr.eye
-        self.mouth_state.shape = expr.mouth
-        if changed:
-            eyes.trigger_blink(self.eye_state, time.time())
+        with self._lock:
+            # 표정이 실제로 바뀌면 깜빡임으로 자연스럽게 전환
+            changed = self.expression.name != expr.name
+            self.expression = expr
+            self.eye_state.shape = expr.eye
+            self.mouth_state.shape = expr.mouth
+            if changed:
+                eyes.trigger_blink(self.eye_state, time.time())
 
     def show_speech(self, text: str, duration_sec: float) -> None:
         """발화 시작 시 호출 — 말풍선 표시 시작.
@@ -56,16 +63,18 @@ class FaceState:
         음성 끝나고도 추가 시간 노출 (사용자가 읽을 시간).
         """
         from src.config import BEHAVIOR
-        self.speech_text = text
-        hold = max(
-            duration_sec + BEHAVIOR.speech_extra_hold_sec,
-            BEHAVIOR.min_speech_display_sec,
-        )
-        self.speech_until = time.time() + hold
+        with self._lock:
+            self.speech_text = text
+            hold = max(
+                duration_sec + BEHAVIOR.speech_extra_hold_sec,
+                BEHAVIOR.min_speech_display_sec,
+            )
+            self.speech_until = time.time() + hold
 
     def clear_speech(self) -> None:
-        self.speech_text = None
-        self.speech_until = 0.0
+        with self._lock:
+            self.speech_text = None
+            self.speech_until = 0.0
 
 
 def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:

@@ -1,11 +1,13 @@
 """Claude API 통합 — 대사 생성, 일정 추출.
 
 prompt caching으로 시스템 프롬프트 재사용해 비용 절감.
+누적 token usage는 _Usage 싱글톤이 추적 (시간당 비용 가시화).
 """
 
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +15,88 @@ from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MODEL_HEAVY
 from src.utils.logger import get_logger
 
 log = get_logger("conversation")
+
+
+# === API 사용량 추적 ===
+# Sonnet 4.5 기준 가격 (per 1M tokens, USD). 모델 바뀌면 수정.
+# https://www.anthropic.com/pricing
+_PRICE_INPUT_USD = 3.0
+_PRICE_CACHE_WRITE_USD = 3.75
+_PRICE_CACHE_READ_USD = 0.30
+_PRICE_OUTPUT_USD = 15.0
+
+
+class _UsageTracker:
+    """Claude API 호출 누적 token + 추정 USD 비용. 1시간마다 INFO 로그."""
+
+    def __init__(self) -> None:
+        self.input_tokens = 0
+        self.cache_write_tokens = 0
+        self.cache_read_tokens = 0
+        self.output_tokens = 0
+        self.calls = 0
+        self.image_attaches = 0
+        self.started_at = time.time()
+        self._last_logged_at = self.started_at
+        self._log_interval_sec = 600.0   # 10분마다 요약
+
+    def record(self, usage: Any, *, had_image: bool = False) -> None:
+        """anthropic Usage 객체에서 카운트 추출.
+
+        usage.input_tokens / .output_tokens / .cache_creation_input_tokens /
+        .cache_read_input_tokens — SDK 버전에 따라 일부 없을 수 있어 getattr.
+        """
+        if usage is None:
+            return
+        self.input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
+        self.cache_write_tokens += int(
+            getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        )
+        self.cache_read_tokens += int(
+            getattr(usage, "cache_read_input_tokens", 0) or 0,
+        )
+        self.output_tokens += int(getattr(usage, "output_tokens", 0) or 0)
+        self.calls += 1
+        if had_image:
+            self.image_attaches += 1
+        self._maybe_log()
+
+    def estimated_usd(self) -> float:
+        return (
+            self.input_tokens * _PRICE_INPUT_USD
+            + self.cache_write_tokens * _PRICE_CACHE_WRITE_USD
+            + self.cache_read_tokens * _PRICE_CACHE_READ_USD
+            + self.output_tokens * _PRICE_OUTPUT_USD
+        ) / 1_000_000
+
+    def hourly_estimate_usd(self) -> float:
+        elapsed_h = (time.time() - self.started_at) / 3600.0
+        if elapsed_h < 0.05:   # 3분 미만이면 미정 (extrapolation 의미 없음)
+            return 0.0
+        return self.estimated_usd() / elapsed_h
+
+    def summary(self) -> str:
+        return (
+            f"Claude usage: calls={self.calls} image={self.image_attaches} "
+            f"in={self.input_tokens} cache_w={self.cache_write_tokens} "
+            f"cache_r={self.cache_read_tokens} out={self.output_tokens} "
+            f"≈${self.estimated_usd():.4f} "
+            f"(시간당 ≈${self.hourly_estimate_usd():.3f})"
+        )
+
+    def _maybe_log(self) -> None:
+        now = time.time()
+        if now - self._last_logged_at >= self._log_interval_sec:
+            self._last_logged_at = now
+            log.info(self.summary())
+
+
+_usage = _UsageTracker()
+
+
+def get_usage_summary() -> str:
+    """외부에서 현재 누적 사용량 조회 (web UI 등)."""
+    return _usage.summary()
 
 
 SYSTEM_PROMPT = """당신은 사용자 책상 위에 있는 작은 캐릭터 로봇입니다.
@@ -82,6 +166,7 @@ class _ClaudeClient:
                 ],
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            _usage.record(getattr(response, "usage", None))
             text = "".join(b.text for b in response.content if b.type == "text")  # type: ignore[attr-defined]
             return text.strip()
         except Exception as e:
@@ -145,6 +230,9 @@ class _ClaudeClient:
                 ],
                 tools=tools,
                 messages=messages,
+            )
+            _usage.record(
+                getattr(response, "usage", None), had_image=bool(image_b64),
             )
             actions: list[dict] = []
             assistant_blocks: list[dict] = []
