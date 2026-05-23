@@ -132,9 +132,10 @@ async def run_vision(
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
-    # 거리 변화 감지 — 안정화 위해 최근 N개 median으로 비교
+    # 거리 변화 감지 — 안정화 위해 최근 N개 median으로 비교.
+    # bbox area 노이즈가 크니 16 프레임 ≈ 4초 윈도우로 둔감화.
     last_distance_for_comment: float | None = None
-    dist_window: deque[float] = deque(maxlen=8)
+    dist_window: deque[float] = deque(maxlen=16)
     last_diag_log_at = 0.0
     # fps 프로파일링 — 매 N프레임마다 처리 시간/fps 로그
     _fps_frame_count = 0
@@ -369,9 +370,10 @@ async def run_vision(
                         smoothed = sorted_w[len(sorted_w) // 2]   # median
                         delta = smoothed - last_distance_for_comment
                         # 거리 변동은 conversation_log에 안 쌓음 — bbox 노이즈로
-                        # 자주 ±60cm 흔들려서 Claude 컨텍스트 오염시켜 "왔다 갔다"
+                        # 자주 흔들려서 Claude 컨텍스트 오염시켜 "왔다 갔다"
                         # 인상 줌. 실제 발화한 경우만 say() 내부에서 log_robot됨.
-                        if delta < -60:
+                        # 임계 ±100cm — 진짜 큰 거리 변화만 멘트 (bbox 추정 정확도 한계).
+                        if delta < -100:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(ctx),
@@ -379,7 +381,7 @@ async def run_vision(
                                 cooldown_sec=180.0,
                             )
                             last_distance_for_comment = smoothed
-                        elif delta > 60:
+                        elif delta > 100:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.farther_message(ctx),
