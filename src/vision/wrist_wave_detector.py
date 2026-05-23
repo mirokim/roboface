@@ -51,7 +51,7 @@ class WristWaveDetector:
         self,
         fps: float = 5.0,
         history_sec: float = 1.5,
-        cooldown_sec: float = 5.0,
+        cooldown_sec: float = 2.0,   # 짧게 — 연속 wave 검출 가능
         # 진폭은 어깨너비의 배수 — 거리 무관.
         # 키보드/마우스 작업 손 진동과 구분 위해 0.35 (어깨너비 35% 이상).
         min_amplitude_ratio: float = 0.35,

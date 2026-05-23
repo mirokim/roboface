@@ -357,11 +357,12 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     speech_task = behavior_speaker.say(
         face, ctx, msg,
         kind="hands_up_reply",
-        cooldown_sec=10.0,
+        cooldown_sec=3.0,
         expression=STARSTRUCK,
         bypass_quiet=True,   # 사용자 능동 제스처 — 새벽이라도 응답
     )
     if speech_task is None:
+        flash_expression(face, STARSTRUCK, 0.6)
         return
     ctx.transition(State.GREETING, face)
     await asyncio.sleep(0)
@@ -403,12 +404,14 @@ async def _wave_back(ctx: StateContext, face: FaceState, servos) -> None:
     speech_task = behavior_speaker.say(
         face, ctx, greeting,
         kind="wave_reply",
-        cooldown_sec=10.0,    # kind별 짧은 cooldown
+        cooldown_sec=3.0,     # 짧게 — 연속 wave에 빠른 반응
         expression=HAPPY,
         bypass_quiet=True,    # 사용자 능동 제스처 — 새벽이라도 응답
     )
     if speech_task is None:
-        return   # quiet hours / cooldown — state 안 건드렸으니 복귀 불필요
+        # cooldown으로 막혔어도 무시 신호는 X — 짧은 표정 flash로 "봤어" 인디케이션
+        flash_expression(face, HAPPY, 0.6)
+        return
     ctx.transition(State.GREETING, face)
     await asyncio.sleep(0)  # bubble 즉시 노출
     try:
