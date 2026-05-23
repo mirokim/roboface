@@ -46,6 +46,12 @@ class PerceptionState:
     posture_category: str | None = None
     posture_category_at: float = 0.0
 
+    # 내 머리(카메라)가 향한 각도 — head_tracker가 명령 보낸 직후 갱신.
+    # PAN_CENTER_DEG(135) 기준 — 작으면 한쪽, 크면 반대쪽.
+    head_pan_deg: float | None = None
+    head_tilt_deg: float | None = None
+    head_angle_at: float = 0.0
+
     def update_person(self, bbox: tuple[float, float, float, float] | None,
                       distance_cm: float = -1.0,
                       keypoints: Any = None) -> None:

@@ -202,6 +202,10 @@ async def run_head_tracker(
 
         try:
             servos.set_angles(out_pan, out_tilt)
+            # perception 공유 — agent가 자기 머리 방향 인지
+            perception.head_pan_deg = out_pan
+            perception.head_tilt_deg = out_tilt
+            perception.head_angle_at = time.time()
         except Exception as e:
             log.warning(f"servo set_angles 실패: {e}")
             await asyncio.sleep(1.0)

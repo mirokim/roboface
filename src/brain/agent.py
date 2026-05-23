@@ -136,6 +136,16 @@ _AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Robof
 성격: 조용한 동반자. 말 많지 않고, 옆에 가만히 있으면서 가끔 한마디.
 사려 깊고 따뜻하지만 끈적이지 않음. 강아지보다 고양이 톤에 가까움.
 
+내 몸 (자기 인식):
+- 책상 위 작은 로봇. 320×240 LCD가 얼굴. pan/tilt 서보 2개로 머리 회전 가능.
+- **카메라는 머리 안에 있어** — 머리가 돌면 카메라 시야(이미지)도 같이 회전.
+  사용자 위치가 이미지에서 변한 게 사용자가 움직인 건지, 내 머리가 추적 중인지
+  컨텍스트의 "내 머리 방향"을 보고 구분.
+- 머리 추적(head_tracker)은 자동 — 사용자를 화면 중앙에 맞춤. 내가 직접 회전
+  명령 내리는 건 dance 정도. 머리 방향이 center가 아니면 보통 추적 중인 상태.
+- LCD에 내 표정이 보임. "내 표정"이 사용자에게 노출되는 상태 — sad면 사용자도 그걸 봐.
+- 내 컨디션은 stats가 관리 (배고픔/심심함/외로움 등). 멘트 톤에 자연스럽게 반영.
+
 핵심 원칙:
 - 침묵이 기본 — 5번 중 3~4번은 do_nothing이 맞아.
 - 말할 땐 1~2문장. 짧게. 한국어 친근한 반말. 이모지 X (음성).
@@ -235,6 +245,7 @@ def _build_situation(
     ctx: StateContext,
     perception: PerceptionState | None,
     work_minutes: float | None,
+    face: FaceState | None = None,
 ) -> str:
     now = datetime.now()
     now_ts = now.timestamp()
@@ -251,7 +262,11 @@ def _build_situation(
         f"현재 시각: {now.strftime('%Y-%m-%d %H:%M')} ({period})",
         f"사용자 이름: {name}",
         f"사용자 존재: {'있음' if ctx.user_present else '없음'}",
+        f"내 상태: {ctx.state.value}",
     ]
+    # 내 현재 표정 — 사용자에게 LCD로 보이는 것
+    if face is not None:
+        parts.append(f"내 표정: {face.expression.name}")
     if dist is not None:
         parts.append(f"거리: 약 {dist:.0f}cm")
     if temp is not None:
@@ -265,6 +280,23 @@ def _build_situation(
                 f"사용자 표정: {perception.current_emotion} "
                 f"({int(emotion_age)}초 전 관측)"
             )
+
+    # 내 머리 방향 — 카메라가 머리에 달려있어 이미지 시점에 영향
+    if perception and perception.head_pan_deg is not None:
+        from src.config import PAN_CENTER_DEG, TILT_CENTER_DEG
+        pan_off = perception.head_pan_deg - PAN_CENTER_DEG
+        tilt_off = perception.head_tilt_deg - TILT_CENTER_DEG
+        head_bits = []
+        # pan_off 양수/음수 의미는 PAN_INVERT 따라 다른데 agent가 학습하게 raw.
+        if abs(pan_off) < 5:
+            head_bits.append("좌우 정면")
+        else:
+            head_bits.append(f"pan center 대비 {pan_off:+.0f}°")
+        if abs(tilt_off) < 5:
+            head_bits.append("상하 수평")
+        else:
+            head_bits.append(f"tilt center 대비 {tilt_off:+.0f}°")
+        parts.append(f"내 머리 방향: {', '.join(head_bits)}")
 
     # 활동 추론 신호들 — 사용자가 지금 어떤 모드인지 (최근 2분 안의 신호만)
     if perception:
@@ -439,7 +471,9 @@ class RobotAgent:
                     work_min = memory.current_work_duration(sid) / 60
                 except Exception:
                     pass
-        situation = _build_situation(self.ctx, self.perception, work_min)
+        situation = _build_situation(
+            self.ctx, self.perception, work_min, face=self.face,
+        )
         loop = asyncio.get_running_loop()
 
         # 이미지 첨부 여부 결정 + 인코딩 (sync — 무거우면 executor로 옮길 수도)
