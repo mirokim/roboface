@@ -12,6 +12,7 @@ import asyncio
 import signal
 import sys
 import time
+from datetime import datetime
 
 from src.audio.mic import Microphone, MicCaptureError
 from src.brain import conversation_templates, memory, stats as robot_stats
@@ -230,6 +231,11 @@ def _handle_sensor_event(
         absence_sec = (now - ctx.last_user_seen_at) if not first_time else 60.0
         ctx.user_present = True
         ctx.last_user_seen_at = now
+        # 오늘 처음 본 거면 first_seen_today_at 기록 (자정 지나면 초기화)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if ctx.first_seen_today_date != today_str:
+            ctx.first_seen_today_at = now
+            ctx.first_seen_today_date = today_str
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
         flash_expression(face, SURPRISED, 0.45)

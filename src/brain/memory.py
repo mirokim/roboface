@@ -94,6 +94,15 @@ CREATE TABLE IF NOT EXISTS command_queue (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cmd_status ON command_queue(status, id);
+
+-- agent가 사용자에 대해 학습한 사실 (선호/관심사/맥락).
+-- key는 짧은 주제 (예: "favorite_drink"), value는 자연어 짧은 표현.
+CREATE TABLE IF NOT EXISTS learned_facts (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    learned_at REAL NOT NULL,
+    last_used_at REAL
+);
 """
 
 
@@ -197,6 +206,24 @@ def proactive_count_last_hour() -> int:
             "SELECT COUNT(*) AS c FROM proactive_log WHERE ts >= ?", (cutoff,),
         ).fetchone()
         return row["c"]
+
+
+def last_proactive_log(within_minutes: float = 30.0) -> dict | None:
+    """최근 N분 내 마지막으로 fire된 proactive trigger 이벤트.
+
+    agent가 "방금 어떤 트리거 멘트가 나갔지" 인지하는 용도.
+    return: {"ts": float, "trigger": str, "message": str} 또는 None.
+    """
+    cutoff = time.time() - within_minutes * 60
+    with db() as conn:
+        row = conn.execute(
+            "SELECT ts, trigger, message FROM proactive_log "
+            "WHERE ts >= ? ORDER BY ts DESC LIMIT 1",
+            (cutoff,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"ts": row["ts"], "trigger": row["trigger"], "message": row["message"]}
 
 
 # === Schedules ===
@@ -340,6 +367,65 @@ def recent_conversation(minutes: float = 10.0, limit: int = 20) -> list[dict]:
         # 오래된 것 → 최근 순으로 반환 (LLM context 용)
         out.reverse()
         return out
+
+
+def remember_fact(key: str, value: str) -> None:
+    """agent가 학습한 사실 저장/갱신. key가 같으면 value/시각 덮어씀."""
+    key = (key or "").strip()
+    value = (value or "").strip()
+    if not key or not value:
+        return
+    now = time.time()
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO learned_facts(key, value, learned_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "  value = excluded.value, learned_at = excluded.learned_at",
+            (key, value, now),
+        )
+
+
+def all_facts(limit: int = 30) -> list[dict]:
+    """모든 학습된 사실 (최근 갱신 순)."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT key, value, learned_at FROM learned_facts "
+            "ORDER BY learned_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {"key": r["key"], "value": r["value"], "learned_at": r["learned_at"]}
+        for r in rows
+    ]
+
+
+def forget_fact(key: str) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM learned_facts WHERE key = ?", (key.strip(),))
+
+
+def search_conversation(
+    keyword: str, days: float = 7.0, limit: int = 10,
+) -> list[dict]:
+    """conversation_log에서 keyword 포함된 항목 검색 (대소문자 무관).
+
+    agent의 recall 도구가 호출. 가장 최근부터 limit개 반환.
+    """
+    if not keyword.strip():
+        return []
+    cutoff = time.time() - days * 86400
+    pattern = f"%{keyword.strip()}%"
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT ts, speaker, kind, text FROM conversation_log "
+            "WHERE ts >= ? AND text LIKE ? "
+            "ORDER BY ts DESC LIMIT ?",
+            (cutoff, pattern, limit),
+        ).fetchall()
+    return [
+        {"ts": r["ts"], "speaker": r["speaker"], "kind": r["kind"], "text": r["text"]}
+        for r in rows
+    ]
 
 
 def today_user_utterances(limit: int = 50) -> list[str]:

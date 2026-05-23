@@ -28,6 +28,10 @@ class PerceptionState:
     temperature_c: float | None = None
     humidity_pct: float | None = None
 
+    # 사용자 표정 (emotion_mirror 최신 결과). neutral/smile/surprised/sad/None.
+    current_emotion: str | None = None
+    current_emotion_at: float = 0.0
+
     def update_person(self, bbox: tuple[float, float, float, float] | None,
                       distance_cm: float = -1.0,
                       keypoints: Any = None) -> None:

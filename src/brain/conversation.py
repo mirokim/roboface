@@ -96,11 +96,24 @@ class _ClaudeClient:
         model: str = CLAUDE_MODEL,
         max_tokens: int = 300,
         system: str = SYSTEM_PROMPT,
-    ) -> list[dict]:
-        """tool use 모드 호출. 결과: [{"name": ..., "input": {...}}, ...]"""
+        messages: list[dict] | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        """tool use 모드 호출.
+
+        return: (actions, full_messages)
+        - actions: 이 응답 turn에서 호출된 tool_use 액션 리스트
+                   [{"id": ..., "name": ..., "input": {...}}, ...]
+        - full_messages: 다음 round-trip(tool_result 회신)에 그대로 사용할 수
+                         있도록 user 메시지 + assistant 응답까지 포함된 리스트.
+                         호출자가 tool_result를 추가해 재호출 가능.
+
+        호환성: messages 미지정 시 user_prompt만으로 단일 user 메시지 생성.
+        """
         client = self._ensure()
         if client is None:
-            return []
+            return [], []
+        if messages is None:
+            messages = [{"role": "user", "content": user_prompt}]
         try:
             response = client.messages.create(
                 model=model,
@@ -113,19 +126,35 @@ class _ClaudeClient:
                     }
                 ],
                 tools=tools,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=messages,
             )
             actions: list[dict] = []
+            assistant_blocks: list[dict] = []
             for block in response.content:
-                if getattr(block, "type", None) == "tool_use":
+                btype = getattr(block, "type", None)
+                if btype == "tool_use":
                     actions.append({
+                        "id": getattr(block, "id", None),
                         "name": block.name,
                         "input": block.input,
                     })
-            return actions
+                    assistant_blocks.append({
+                        "type": "tool_use",
+                        "id": getattr(block, "id", None),
+                        "name": block.name,
+                        "input": block.input,
+                    })
+                elif btype == "text":
+                    assistant_blocks.append({
+                        "type": "text", "text": block.text,
+                    })
+            full_messages = list(messages) + [
+                {"role": "assistant", "content": assistant_blocks},
+            ]
+            return actions, full_messages
         except Exception as e:
             log.warning(f"Claude tool 호출 실패: {e}")
-            return []
+            return [], []
 
 
 _client = _ClaudeClient()

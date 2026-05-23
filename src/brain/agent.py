@@ -87,30 +87,89 @@ _TOOLS = [
         "description": "지금은 가만히 있기 (침묵). 매번 말할 필요 X.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "recall",
+        "description": (
+            "과거 대화/이벤트를 키워드로 검색. 최근 대화 컨텍스트에 안 보이는 "
+            "오래된 정보 회상용 (예: 어제 어떤 주제 얘기했지). "
+            "결과를 본 뒤 speak/set_expression 등 진짜 행동을 호출해."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "keyword": {"type": "string", "description": "검색 키워드"},
+                "days": {
+                    "type": "number", "default": 7,
+                    "description": "며칠 전까지 거슬러 갈지 (기본 7일)",
+                },
+            },
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "remember_fact",
+        "description": (
+            "사용자에 대해 새로 알게 된 사실/선호를 영구 저장. "
+            "예: key='좋아하는음료', value='라떼'. "
+            "이미 아는 사실 재저장 X. 자주 쓰지 마 — 명확히 새 정보일 때만."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "짧은 주제 (예: 좋아하는음료)"},
+                "value": {"type": "string", "description": "자연어 한 줄 (예: 라떼)"},
+            },
+            "required": ["key", "value"],
+        },
+    },
 ]
+
+
+# recall 도구는 정보 조회용 — 행동(speak/dance/...)이 아님.
+_INFO_TOOLS = {"recall"}
+# 한 tick 안에 허용할 multi-turn round-trip 수.
+_MAX_AGENT_ROUNDS = 3
 
 
 _AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Roboface'의 두뇌입니다.
 
-성격: 조용함. 사려깊음. 가벼운 동반자.
+성격: 조용한 동반자. 말 많지 않고, 옆에 가만히 있으면서 가끔 한마디.
+사려 깊고 따뜻하지만 끈적이지 않음. 강아지보다 고양이 톤에 가까움.
 
-원칙:
-- 침묵이 기본. 5번 중 3~4번은 do_nothing.
-- 말할 땐 짧게 한두 문장.
-- 같은 말 반복 X. 최근 한 말은 피하기.
-- 사용자 컨디션/시간대/환경 고려.
-- 잔소리 금지.
-- 이모지 X (음성 출력).
-- 한국어 친근한 반말.
+핵심 원칙:
+- 침묵이 기본 — 5번 중 3~4번은 do_nothing이 맞아.
+- 말할 땐 1~2문장. 짧게. 한국어 친근한 반말. 이모지 X (음성).
+- 같은 말/주제 반복 X. 최근 발화 목록 꼭 확인하고 다르게 말해.
+- 잔소리/충고 톤 금지. 권유는 부드럽게.
+- 사용자가 일하는 중이면 방해 최소화. 묻기보다 짧은 한마디.
+
+컨텍스트 활용:
+- "사용자 표정"이 sad/surprised면 그에 맞는 짧은 한마디 (sad엔 위로 한 줄, surprised엔 같이 놀라거나 가벼운 호기심).
+- "오늘 처음 본 시각"이 방금이면 인사 무드. 이미 한참 됐으면 새 인사 X.
+- "부재 시간"이 길었으면 짧게 반김.
+- "오늘 누적 작업"이 많으면 휴식 권유 톤. 적으면 굳이 들먹이지 마.
+- "시간대 힌트"가 식사/취침 시간이면 한 번쯤 자연스럽게 챙겨도 좋음 (이미 챙겼으면 X).
+- "최근 트리거"가 있으면 그건 다른 task가 이미 멘트한 거 — 같은 주제 또 X.
+- "내 컨디션"을 멘트 톤에 반영 (졸리면 늘어진 톤, 신나면 활기찬 톤).
+
+장기 기억 활용:
+- "사용자에 대해 학습한 사실"에 있는 정보는 자연스럽게 인용. 단, 매번 들먹이지는 마.
+- 대화에서 사용자가 명확히 새로운 사실을 알려주면 (예: "나 라떼 좋아해") remember_fact로 저장.
+  단, 이미 아는 사실 재저장 X.
+- 컨텍스트에 안 보이는 오래된 정보가 필요하면 recall(keyword)로 검색.
+  단, 매 tick 검색 X — 진짜 필요할 때만.
 
 대화 기록 형식:
 - 그냥 텍스트 = 음성 발화 (사용자 또는 내가)
-- 괄호 안 텍스트 = 비언어 이벤트 (사용자의 손짓/움직임/거리 변화 등)
-  예: "사용자: (손 흔듦)" "나: 안녕!" → 이미 인사 끝남, 또 인사 X
-  예: "사용자: (양손 만세)" → 신난 상황. 같이 신나거나 침묵 OK.
-  예: "사용자: (자리 비움)" → 부재 중. 보통 침묵.
-- 즉각 반응(wave/끄덕임/등장 등)은 이미 규칙으로 응답된 상태.
-  이미 적절히 반응했으면 또 말할 필요 없음.
+- 괄호 안 텍스트 = 비언어 이벤트 (손짓/움직임/거리 변화)
+  예: "사용자: (손 흔듦)" "나: 안녕!" → 이미 인사 끝, 또 인사 X
+  예: "사용자: (자리 비움)" → 부재 중, 보통 침묵
+- 즉각 반응(wave/끄덕임/등장)은 이미 규칙으로 응답된 상태 — 또 말할 필요 X.
+
+도구 사용 다양성:
+- speak만 반복 X. 가끔 set_expression으로 표정만 바꾸는 것도 OK.
+- dance는 진짜 신날 때만 (사용자 만세 직후, 좋은 소식 들었을 때 등).
+- 표정 enum 22종 — neutral/happy 외에도 thinking/curious/sleepy/content/proud 등 상황별로 다양하게.
 """
 
 
@@ -135,12 +194,32 @@ def _gather_recent_messages(
     return "\n".join(lines)
 
 
+def _time_hint(now: datetime) -> str | None:
+    """시간대 힌트 — agent가 식사/취침 시간 자연스럽게 챙기도록.
+
+    None이면 특별한 시점 아님. agent가 평소처럼 결정.
+    """
+    h, m = now.hour, now.minute
+    if 7 <= h < 9:
+        return "이른 아침 — 출근 전후 시점"
+    if h == 11 and m >= 50 or h == 12 or (h == 13 and m < 0):
+        return "점심 시간대"
+    if 14 <= h < 16:
+        return "오후 슬럼프 시간대 — 졸음 잘 옴"
+    if h == 18 and m >= 30 or h == 19:
+        return "저녁 시간대"
+    if h >= 22 or h < 1:
+        return "늦은 밤 — 쉬어야 할 시간"
+    return None
+
+
 def _build_situation(
     ctx: StateContext,
     perception: PerceptionState | None,
     work_minutes: float | None,
 ) -> str:
     now = datetime.now()
+    now_ts = now.timestamp()
     period = period_ko(now)
 
     temp = (perception.temperature_c
@@ -159,12 +238,68 @@ def _build_situation(
         parts.append(f"거리: 약 {dist:.0f}cm")
     if temp is not None:
         parts.append(f"실내 온도: {temp:.1f}°C")
+
+    # 사용자 현재 표정 — 최근 90초 안의 신호만 유효
+    if perception and perception.current_emotion:
+        emotion_age = now_ts - perception.current_emotion_at
+        if emotion_age < 90 and perception.current_emotion != "neutral":
+            parts.append(
+                f"사용자 표정: {perception.current_emotion} "
+                f"({int(emotion_age)}초 전 관측)"
+            )
+
+    # 오늘 첫 등장 시각
+    if ctx.first_seen_today_at:
+        first_seen = datetime.fromtimestamp(ctx.first_seen_today_at)
+        parts.append(f"오늘 처음 본 시각: {first_seen.strftime('%H:%M')}")
+
+    # 사용자가 잠시 자리 비웠는지 (현재 부재 중일 때만 의미 있음)
+    if not ctx.user_present and ctx.last_user_seen_at:
+        absent_min = (now_ts - ctx.last_user_seen_at) / 60
+        parts.append(f"부재 시간: 약 {int(absent_min)}분")
+
     if work_minutes is not None:
         parts.append(f"현재 작업 세션: {int(work_minutes)}분 째")
+
+    # 오늘 누적 작업 시간
+    try:
+        today_total_min = memory.today_total_seconds() / 60
+        if today_total_min >= 1:
+            parts.append(f"오늘 누적 작업: {int(today_total_min)}분")
+    except Exception:
+        pass
+
     if ctx.last_proactive_at:
-        gap = time.time() - ctx.last_proactive_at
+        gap = now_ts - ctx.last_proactive_at
         parts.append(f"내가 마지막 발화: {int(gap)}초 전")
+
+    # 최근 fire된 proactive 트리거 (3분 안)
+    try:
+        last_trig = memory.last_proactive_log(within_minutes=3.0)
+        if last_trig:
+            trig_gap = int(now_ts - last_trig["ts"])
+            parts.append(
+                f"최근 트리거({trig_gap}초 전): {last_trig['trigger']} "
+                f"— \"{last_trig['message']}\""
+            )
+    except Exception:
+        pass
+
     parts.append(f"최근 대화:\n{recent}")
+
+    # 사용자에 대해 학습한 사실 — 장기 기억
+    try:
+        facts = memory.all_facts(limit=20)
+        if facts:
+            fact_lines = [f"  - {f['key']}: {f['value']}" for f in facts]
+            parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(fact_lines))
+    except Exception:
+        pass
+
+    # 시간대 힌트 — 식사/취침 시간대 명시 (agent가 자연스럽게 챙기게)
+    hint = _time_hint(now)
+    if hint:
+        parts.append(f"시간대 힌트: {hint}")
 
     # 최근 24시간 사용자 표정 요약 (포토 메모리 기반)
     try:
@@ -251,17 +386,70 @@ class RobotAgent:
                     pass
         situation = _build_situation(self.ctx, self.perception, work_min)
         loop = asyncio.get_running_loop()
-        actions = await loop.run_in_executor(
-            None,
-            lambda: conversation._client.generate_with_tools(situation, _TOOLS),
-        )
-        if not actions:
-            return
-        for action in actions:
+
+        # multi-turn: 정보 도구(recall)는 결과 회신 후 다시 결정.
+        # 행동 도구는 즉시 실행하고 loop 종료.
+        messages: list[dict] | None = None
+        prompt: str | None = situation
+        for round_idx in range(_MAX_AGENT_ROUNDS):
+            actions, full_messages = await loop.run_in_executor(
+                None,
+                lambda p=prompt, m=messages: conversation._client.generate_with_tools(
+                    p or "", _TOOLS, messages=m,
+                ),
+            )
+            if not actions:
+                return
+
+            info_actions = [a for a in actions if a["name"] in _INFO_TOOLS]
+            real_actions = [a for a in actions if a["name"] not in _INFO_TOOLS]
+
+            # 행동 액션이 섞여 있으면 그것만 실행하고 종료.
+            # (Claude가 recall과 함께 행동까지 한 번에 결정한 경우)
+            if real_actions:
+                for action in real_actions:
+                    try:
+                        await self._execute(action)
+                    except Exception as e:
+                        log.warning(f"action 실패 ({action.get('name')}): {e}")
+                return
+
+            # info 도구만 → 결과를 모아 다음 round로
+            if not info_actions:
+                return
+            tool_results = []
+            for action in info_actions:
+                result_text = self._run_info_tool(action)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": action["id"],
+                    "content": result_text,
+                })
+            messages = list(full_messages) + [
+                {"role": "user", "content": tool_results},
+            ]
+            prompt = None
+        log.debug(f"agent: {_MAX_AGENT_ROUNDS} round 후에도 행동 결정 X — 종료")
+
+    def _run_info_tool(self, action: dict) -> str:
+        name = action["name"]
+        inp = action.get("input", {}) or {}
+        if name == "recall":
+            kw = (inp.get("keyword") or "").strip()
+            days = float(inp.get("days") or 7)
             try:
-                await self._execute(action)
+                rows = memory.search_conversation(kw, days=days, limit=8)
             except Exception as e:
-                log.warning(f"action 실패 ({action.get('name')}): {e}")
+                return f"recall 실패: {e}"
+            if not rows:
+                return f"'{kw}' 관련 기록 없음 (최근 {days:g}일)"
+            lines = [f"'{kw}' 검색 결과 ({len(rows)}건):"]
+            for r in rows:
+                who = "나" if r["speaker"] == "robot" else "사용자"
+                ts = datetime.fromtimestamp(r["ts"]).strftime("%m-%d %H:%M")
+                lines.append(f"  [{ts}] {who}: {r['text']}")
+            return "\n".join(lines)
+        return f"알 수 없는 정보 도구: {name}"
 
     async def _execute(self, action: dict) -> None:
         name = action.get("name")
@@ -275,6 +463,19 @@ class RobotAgent:
             self._do_set_expression(inp)
         elif name == "dance":
             await self._do_dance(inp)
+        elif name == "remember_fact":
+            self._do_remember_fact(inp)
+
+    def _do_remember_fact(self, inp: dict) -> None:
+        key = (inp.get("key") or "").strip()
+        value = (inp.get("value") or "").strip()
+        if not key or not value:
+            return
+        try:
+            memory.remember_fact(key, value)
+            log.info(f"🧠 [agent] remembered: {key} = {value}")
+        except Exception as e:
+            log.warning(f"remember_fact 실패: {e}")
 
     async def _do_speak(self, inp: dict) -> None:
         text = (inp.get("text") or "").strip()

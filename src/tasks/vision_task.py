@@ -516,6 +516,10 @@ async def run_vision(
                             cur_emotion = "sad"
                         else:
                             cur_emotion = "neutral"
+                        # perception 공유 — agent가 현 순간 사용자 표정 인지하도록
+                        if perception is not None:
+                            perception.current_emotion = cur_emotion
+                            perception.current_emotion_at = time.time()
 
                     # 포토 메모리 — 30~60분 랜덤 간격
                     now_ts = time.time()

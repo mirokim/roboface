@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from datetime import datetime
 
 import pygame
 
@@ -188,8 +189,13 @@ def _handle_sensor_event(
     work_tracker.on_event(ev, ctx)
 
     if ev.type == SensorEventType.PRESENCE_NEW:
+        now = time.time()
         ctx.user_present = True
-        ctx.last_user_seen_at = time.time()
+        ctx.last_user_seen_at = now
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if ctx.first_seen_today_date != today_str:
+            ctx.first_seen_today_at = now
+            ctx.first_seen_today_date = today_str
         if ctx.state == State.IDLE:
             ctx.transition(State.WATCHING, face)
     elif ev.type == SensorEventType.PRESENCE_LEFT:

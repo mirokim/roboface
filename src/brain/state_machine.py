@@ -29,6 +29,9 @@ class StateContext:
     entered_at: float = field(default_factory=time.time)
     last_user_seen_at: float | None = None
     last_proactive_at: float | None = None
+    # 오늘 사용자를 처음 본 시각 (자정에 reset). agent가 "오늘 처음/N번째" 판단용.
+    first_seen_today_at: float | None = None
+    first_seen_today_date: str | None = None   # "YYYY-MM-DD" — 날짜 비교용
     # 마지막 인사 (greeting/reappear/wave/hands_up) 시각 — 인사 반복 방지
     last_greeting_at: float | None = None
     user_present: bool = False
