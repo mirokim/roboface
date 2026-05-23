@@ -45,7 +45,7 @@ class WristWaveDetector:
     호출. 같은 인스턴스가 좌/우 손목 두 시계열 동시 관리.
     """
 
-    KP_CONF_THRESHOLD = 0.20   # IMX500 pose의 wrist conf 분포 (0.1~0.4)에 맞춤
+    KP_CONF_THRESHOLD = 0.25   # 노이즈 wrist sample 더 빡세게 차단
 
     def __init__(
         self,
@@ -187,9 +187,11 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 손이 어깨 라인 + 어깨너비×0.7(가슴 정도) 이내일 때만 카운트.
-        # → 인사 wave는 가슴 이상 — 허리/책상 작업 손은 빠짐.
-        max_below = shoulder_width * 0.7
+        # 손이 어깨 라인 *위* 또는 어깨너비×0.1(어깨 바로 옆) 이내일 때만 카운트.
+        # 실측: 책상 타이핑/마우스 손이 어깨 아래 가슴-배 부근에서 ±15cm 흔들리며
+        # max_below=0.7로는 통과해 false positive 다수 → 어깨선 위로 강제.
+        # 자연 인사 자세 (손 어깨 높이 이상)만 통과.
+        max_below = shoulder_width * 0.1
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
