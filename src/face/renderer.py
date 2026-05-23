@@ -27,6 +27,9 @@ _EMOJI_RANGES = (
 _EMOJI_SINGLES = {0xFE0F, 0x200D}   # VS16, ZWJ
 # strip 후 남는 빈 (), 빈 [] 등 제거
 _EMPTY_BRACKET_RE = re.compile(r"[\(\[\{][\s,·]*[\)\]\}]")
+# 괄호 무대지문 — Claude가 가끔 `(손을 흔들며)` `(미소)` 식 액션 묘사를 박음.
+# 음성 가정에선 어색해 LCD에도 안 표시. 최대 30자, 한국어 포함.
+_STAGE_DIRECTION_RE = re.compile(r"\([^()]{1,30}\)")
 
 
 def strip_emoji(text: str) -> str:
@@ -39,8 +42,9 @@ def strip_emoji(text: str) -> str:
             continue
         out.append(ch)
     cleaned = "".join(out)
+    cleaned = _STAGE_DIRECTION_RE.sub("", cleaned)
     cleaned = _EMPTY_BRACKET_RE.sub("", cleaned)
-    # 연속 공백 한 개로
+    # 연속 공백/줄바꿈 한 개로
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     return cleaned.strip()
 

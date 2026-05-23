@@ -166,10 +166,10 @@ class _HeadOscillationDetector:
         axis: int,
         fps: float = 5.0,
         history_sec: float = 1.8,    # 더 긴 sustained 동작 필요
-        cooldown_sec: float = 10.0,  # 한 번 감지 후 10초 차단
-        min_amp: float = 0.06,       # 어깨너비 대비 6% 이상 진폭
+        cooldown_sec: float = 20.0,  # 한 번 감지 후 20초 차단 (10→20)
+        min_amp: float = 0.08,       # 어깨너비 대비 8% 이상 (6→8)
         max_amp: float = 0.12,       # 12% 넘으면 일반 머리 회전
-        min_zc: int = 5,             # 2.5 사이클 이상 (확실한 패턴)
+        min_zc: int = 6,             # 3 사이클 이상 (5→6)
         max_zc: int = 10,
     ) -> None:
         self.axis = axis

@@ -266,6 +266,12 @@ def _handle_sensor_event(
             memory.log_env(temp, 0.0)
             if perception is not None:
                 perception.temperature_c = float(temp)
+    elif ev.type == SensorEventType.DISTANCE_CHANGED:
+        # mmWave distance — bbox 추정보다 훨씬 정확 (±5cm vs ±60cm).
+        # vision_task의 person_distance_cm를 덮어씌움.
+        dist = ev.data.get("distance_cm")
+        if dist is not None and dist > 0 and perception is not None:
+            perception.person_distance_cm = float(dist)
     elif ev.type == SensorEventType.GESTURE_WAVE:
         log.info("👋 wave 응답 시작")
         memory.log_user("(손 흔듦)", kind="gesture_wave")
