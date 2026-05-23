@@ -45,7 +45,7 @@ class WristWaveDetector:
     호출. 같은 인스턴스가 좌/우 손목 두 시계열 동시 관리.
     """
 
-    KP_CONF_THRESHOLD = 0.10   # 손목/어깨 keypoint 최소 신뢰도 (HigherHRNet 분포 낮음)
+    KP_CONF_THRESHOLD = 0.15   # 손목/어깨 keypoint 최소 신뢰도 — 노이즈 차단 강화
 
     def __init__(
         self,
@@ -53,10 +53,10 @@ class WristWaveDetector:
         history_sec: float = 1.5,
         cooldown_sec: float = 5.0,
         # 진폭은 어깨너비의 배수 — 거리 무관.
-        # 작게 흔들어도 잡히게 0.4 → 0.3 (어깨너비의 30%면 wave로 인정)
-        min_amplitude_ratio: float = 0.3,
-        # 한두 사이클 좌우 흔들기도 잡히게 3 → 2
-        min_zero_crossings: int = 2,
+        # 키보드/마우스 작업 손 진동과 구분 위해 0.4로 상향 (어깨너비 40% 이상)
+        min_amplitude_ratio: float = 0.4,
+        # 진짜 인사용 wave는 최소 2사이클 — false positive 차단 위해 4로 상향
+        min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
         min_eval_frames: int = 5,   # 6 → 5 (감지 빨리)
     ) -> None:
@@ -187,10 +187,10 @@ class WristWaveDetector:
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 다리 모션 오인 방지. 어깨너비 비례 — 카메라 시점/거리에 무관.
-        # 어깨~허리 정도 (어깨너비×2.0)까지만 wave 허용. 낮은 카메라에선 어깨가
-        # 화면 중하단에 가므로 절대값 기준은 부적절. 비례로 가야 함.
-        max_below = shoulder_width * 2.0
+        # 책상 작업(키보드/마우스) 손 진동을 wave로 오인하지 않게 강화.
+        # 손목이 어깨에서 어깨너비의 30% 이내 아래 (즉 거의 어깨 위 또는 가슴 상단)
+        # 일 때만 카운트. 인사 wave는 손을 든 자세이므로 OK.
+        max_below = shoulder_width * 0.3
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
