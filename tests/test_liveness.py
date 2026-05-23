@@ -16,23 +16,52 @@ from src.tasks import head_tracker, mood_drift
 
 # === Breathing ===
 
-def test_breathing_oscillates():
-    """breath offset이 시간에 따라 변하는지 + 진폭 한계 안에 들어오는지."""
+def _reset_breath_state():
+    head_tracker._breath_state["cycle_start"] = None
+    head_tracker._breath_state["next_cycle_at"] = 0.0
+
+
+def test_breathing_oscillates_during_cycle():
+    """사이클 진행 중에는 tilt가 시간에 따라 변하고 진폭 한계 안."""
+    _reset_breath_state()
     samples = [head_tracker._breathing_offsets(t) for t in (0.0, 1.0, 2.0, 3.0, 4.0)]
-    # 진폭 안
     for pan, tilt in samples:
         assert abs(pan) <= head_tracker.BREATH_PAN_AMP_DEG + 1e-6
-        assert abs(tilt) <= head_tracker.BREATH_TILT_AMP_DEG + 1e-6
-    # 시간 흐름에 따라 다른 값 (정지 아님) — tilt 기준 (PAN amp는 0일 수 있음)
+        assert abs(tilt) <= head_tracker.BREATH_TILT_AMP_MAX_DEG + 1e-6
     tilt_vals = [t for _, t in samples]
     assert len(set(round(t, 3) for t in tilt_vals)) > 1
 
 
 def test_breathing_period_completes():
-    """tilt가 한 주기 후 다시 비슷한 값으로 돌아옴."""
-    _, t0 = head_tracker._breathing_offsets(0.0)
+    """tilt가 한 주기 후 0으로 떨어짐 (사이클 종료)."""
+    _reset_breath_state()
+    head_tracker._breathing_offsets(0.0)  # 사이클 시작
     _, t_period = head_tracker._breathing_offsets(head_tracker.BREATH_TILT_PERIOD_SEC)
-    assert abs(t0 - t_period) < 0.05
+    assert abs(t_period) < 1e-6
+
+
+def test_breathing_silent_between_cycles():
+    """사이클 끝난 직후부터 다음 1시간까지는 (0, 0)."""
+    _reset_breath_state()
+    head_tracker._breathing_offsets(0.0)  # 사이클 시작
+    # 사이클 끝 (60초)
+    head_tracker._breathing_offsets(head_tracker.BREATH_TILT_PERIOD_SEC)
+    # 사이클 끝 직후부터 다음 인터벌 직전까지 휴면
+    for t in (61.0, 600.0, 1800.0, 3599.0):
+        assert head_tracker._breathing_offsets(t) == (0.0, 0.0)
+
+
+def test_breathing_restarts_after_interval():
+    """1시간 지나면 새 사이클이 다시 시작 (tilt 다시 nonzero)."""
+    _reset_breath_state()
+    head_tracker._breathing_offsets(0.0)
+    head_tracker._breathing_offsets(head_tracker.BREATH_TILT_PERIOD_SEC)  # 끝
+    # 1시간 뒤
+    t_next = head_tracker.BREATH_INTERVAL_SEC
+    # 사이클 시작 직후 sin(0)=0이라 1초 뒤로 샘플
+    head_tracker._breathing_offsets(t_next)
+    _, tilt = head_tracker._breathing_offsets(t_next + 15.0)
+    assert abs(tilt) > 0.01
 
 
 # === Micro-saccades ===

@@ -30,7 +30,7 @@ log = get_logger("head_tracker")
 
 # 추적 파라미터 — 적극적이지만 자잘한 움직임 X
 UPDATE_HZ = 15
-SMOOTHING_ALPHA = 0.35
+SMOOTHING_ALPHA = 0.2
 PAN_RANGE_DEG = 70
 TILT_RANGE_DEG = 30
 RETURN_TO_CENTER_AFTER_SEC = 3
@@ -40,8 +40,8 @@ MAX_STEP_DEG = 8.0
 # 1) bbox 센터 자체 N프레임 평균 (입력 노이즈 제거)
 # 2) 타깃 각도 변화가 작으면 stable target 유지 (수렴 안정성)
 # 3) 출력 각도 변화가 0.5도 이내면 서보 명령 자체 skip (PWM 떨림 방지)
-BBOX_SMOOTH_N = 4
-TARGET_DEADZONE_DEG = 1.5
+BBOX_SMOOTH_N = 8
+TARGET_DEADZONE_DEG = 3.0
 # 출력 데드존 — breath(0.2~0.4°)보다 작아야 호흡 동작 통과
 OUTPUT_DEADZONE_DEG = 0.15
 
@@ -49,32 +49,52 @@ PAN_INVERT = True
 TILT_INVERT = True
 
 # === Breathing — 자연 호흡은 위아래만. PAN은 0으로 (갸우뚱 거슬림). ===
-# 60초 주기 — 매우 느림. 진폭은 매 사이클 0.25~0.5° 랜덤 (단조롭지 않게).
-BREATH_TILT_AMP_MIN_DEG = 0.25
-BREATH_TILT_AMP_MAX_DEG = 0.5
+# OFF (amp=0) — 머리+카메라가 한 덩어리라 tilt 진동이 bbox 흔들림 → 추적 떨림으로 증폭됐음.
+# 1시간 간격 게이팅 로직은 남겨두되 진폭이 0이라 시각적 영향 없음.
+BREATH_TILT_AMP_MIN_DEG = 0.0
+BREATH_TILT_AMP_MAX_DEG = 0.0
 BREATH_TILT_PERIOD_SEC = 60.0
 BREATH_PAN_AMP_DEG = 0.0    # 좌우 호흡 거슬리니까 끔
 BREATH_PAN_PERIOD_SEC = 60.0
+BREATH_INTERVAL_SEC = 3600.0  # 1시간에 한 번 사이클 시작
 
 
-# 사이클 단위로 진폭 랜덤화 — 같은 사이클 안에선 안정.
-_breath_state = {
-    "last_cycle": -1,
+# 호흡 사이클 시작 시각 + 그 사이클의 진폭.
+_breath_state: dict[str, float | None] = {
+    "cycle_start": None,
     "current_amp": BREATH_TILT_AMP_MAX_DEG,
+    "next_cycle_at": 0.0,
 }
 
 
 def _breathing_offsets(t: float) -> tuple[float, float]:
-    """현재 시각의 호흡 (pan_offset, tilt_offset). 사이클 바뀌면 진폭 새로."""
-    cycle = int(t / BREATH_TILT_PERIOD_SEC)
-    if cycle != _breath_state["last_cycle"]:
-        _breath_state["last_cycle"] = cycle
-        _breath_state["current_amp"] = random.uniform(
-            BREATH_TILT_AMP_MIN_DEG, BREATH_TILT_AMP_MAX_DEG,
-        )
-    pan = math.sin(t * 2 * math.pi / BREATH_PAN_PERIOD_SEC) * BREATH_PAN_AMP_DEG
+    """현재 시각의 호흡 (pan_offset, tilt_offset).
+
+    1시간에 한 번만 60초짜리 sin 한 주기를 돌고, 그 외 시간은 (0, 0).
+    """
+    cycle_start = _breath_state["cycle_start"]
+
+    if cycle_start is None:
+        # 아직 사이클 중이 아님 — 시작 시각인지 확인.
+        if t >= (_breath_state["next_cycle_at"] or 0.0):
+            _breath_state["cycle_start"] = t
+            _breath_state["current_amp"] = random.uniform(
+                BREATH_TILT_AMP_MIN_DEG, BREATH_TILT_AMP_MAX_DEG,
+            )
+            _breath_state["next_cycle_at"] = t + BREATH_INTERVAL_SEC
+            cycle_start = t
+        else:
+            return 0.0, 0.0
+
+    elapsed = t - cycle_start
+    if elapsed >= BREATH_TILT_PERIOD_SEC:
+        # 사이클 끝 — 다음 1시간까지 휴면.
+        _breath_state["cycle_start"] = None
+        return 0.0, 0.0
+
+    pan = math.sin(elapsed * 2 * math.pi / BREATH_PAN_PERIOD_SEC) * BREATH_PAN_AMP_DEG
     tilt = (
-        math.sin(t * 2 * math.pi / BREATH_TILT_PERIOD_SEC)
+        math.sin(elapsed * 2 * math.pi / BREATH_TILT_PERIOD_SEC)
         * _breath_state["current_amp"]
     )
     return pan, tilt
