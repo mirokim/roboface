@@ -284,6 +284,85 @@ class HeadShakeDetector(_HeadOscillationDetector):
         return False
 
 
+# ─── 시선 타깃 분류 (활동 추론용) ───
+
+class GazeTargetClassifier:
+    """매 프레임 keypoints에서 사용자가 어디 보는지 4단계 분류.
+
+    매 프레임 raw label을 윈도우에 push, majority vote로 안정화.
+
+    카테고리:
+      - "front" : 모니터 응시 (양 눈 보이고 nose pitch 보통)
+      - "down"  : 책상/핸드폰 (nose가 eye보다 크게 아래 — 고개 숙임)
+      - "side"  : 옆 (얼굴 한쪽만 보임)
+      - None    : 신뢰도 부족 또는 사람 없음
+
+    낮은 카메라 시점(책상 위) 가정. 정상 정면 응시 시 nose가 eye보다
+    살짝 아래로 보임. 핸드폰을 보면 nose가 더 많이 아래로 떨어짐.
+    """
+
+    KP_CONF = 0.20
+    # nose_y - eye_avg_y 를 eye_dist로 정규화한 pitch.
+    # 정면일 때 0.1~0.7 정도. 핸드폰/책상 응시 시 0.9 이상.
+    PITCH_DOWN_MIN = 0.9
+    # 정면 응시 인정 최소 pitch — 너무 위 보면 (천장 등) None 처리
+    PITCH_FRONT_MIN = 0.05
+
+    def __init__(self, fps: float = 5.0, window_sec: float = 2.5) -> None:
+        # 2.5초 윈도우 — 빠른 반응 + majority vote로 노이즈 흡수.
+        size = max(4, int(fps * window_sec))
+        self.window: deque[str] = deque(maxlen=size)
+        self._last_decision: str | None = None
+        self._last_decided_at: float = 0.0
+
+    def reset(self) -> None:
+        self.window.clear()
+        self._last_decision = None
+
+    def _raw(self, keypoints: Any) -> str | None:
+        if keypoints is None:
+            return None
+        nose = keypoints[KP_NOSE]
+        l_eye = keypoints[KP_L_EYE]
+        r_eye = keypoints[KP_R_EYE]
+        if nose[2] < self.KP_CONF:
+            return None
+        l_ok = l_eye[2] >= self.KP_CONF
+        r_ok = r_eye[2] >= self.KP_CONF
+        if not l_ok and not r_ok:
+            return None
+        # 한쪽만 보이면 옆모습.
+        if l_ok != r_ok:
+            return "side"
+        eye_dist = float(abs(l_eye[0] - r_eye[0]))
+        if eye_dist < 0.015:
+            return None
+        eye_avg_y = float((l_eye[1] + r_eye[1]) / 2)
+        pitch = (float(nose[1]) - eye_avg_y) / eye_dist
+        if pitch >= self.PITCH_DOWN_MIN:
+            return "down"
+        if pitch >= self.PITCH_FRONT_MIN:
+            return "front"
+        return None
+
+    def process(self, keypoints: Any) -> str | None:
+        """매 프레임 호출. 5초 윈도우 majority 반환 (None이면 아직 미정)."""
+        raw = self._raw(keypoints)
+        if raw is not None:
+            self.window.append(raw)
+        # 윈도우 1/3 이상 채워야 첫 결정 — 빠른 첫 반응 (이후 sliding majority)
+        need = max(3, (self.window.maxlen or 1) // 3)
+        if len(self.window) < need:
+            return self._last_decision
+        # majority
+        decision = max(set(self.window), key=lambda v: list(self.window).count(v))
+        if decision != self._last_decision:
+            log.debug(f"gaze_target → {decision}")
+            self._last_decision = decision
+            self._last_decided_at = time.time()
+        return decision
+
+
 # ─── 정면 응시 (사용자가 로봇을 쳐다봄) ───
 
 class GazeAtMeDetector:

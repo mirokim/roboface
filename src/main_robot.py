@@ -28,6 +28,7 @@ from src.motion.servos import create_controller as create_servos
 from src.sensors.base import SensorEventType
 from src.sensors.manager import SensorManager
 from src.tasks import behavior_speaker, command_executor, journal_writer, schedule_extractor
+from src.tasks.activity_monitor import run_activity_monitor
 from src.tasks.ambient_listener import AmbientListener
 from src.tasks.audio_reactive import run_audio_reactive
 from src.tasks.eye_tracker import run_eye_tracker
@@ -81,6 +82,7 @@ async def run_robot() -> None:
     work_tracker = WorkTracker()
     posture = PostureMonitor(
         keypoints_provider=lambda: perception.last_pose_keypoints,
+        perception=perception,
     )
     ambient = AmbientListener()
     ambient.add_handler(schedule_extractor.handle_transcript)
@@ -111,6 +113,7 @@ async def run_robot() -> None:
         ),
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
+        asyncio.create_task(run_activity_monitor(perception), name="activity"),
         asyncio.create_task(ambient.run(), name="ambient"),
         asyncio.create_task(schedule_extractor.sync_pending_to_thinktank(),
                             name="schedule_sync"),

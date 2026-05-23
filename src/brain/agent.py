@@ -152,6 +152,15 @@ _AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Robof
 - "최근 트리거"가 있으면 그건 다른 task가 이미 멘트한 거 — 같은 주제 또 X.
 - "내 컨디션"을 멘트 톤에 반영 (졸리면 늘어진 톤, 신나면 활기찬 톤).
 
+활동 신호 (시선/활동성/자세) — 사용자가 지금 어떤 모드인지 파악용:
+- 시선=모니터 응시 + 활동성=focused → 작업 중. 방해 X, 침묵 우선.
+- 시선=아래 응시가 길게 지속 → 핸드폰 자주 보는 중일 수도. 잔소리 X, 가끔 한마디 정도.
+- 시선=옆 → 딴 곳 보는 중. 짧게 말 걸면 자연스럽게 시선 복귀할 수도.
+- 활동성=still 오래 → 멍 때리거나 깊이 빠짐. 깨우기보다 가만히 두는 게 보통 맞음.
+- 활동성=restless → 산만함. 차분한 한마디 정도.
+- 자세=slouched (거북목) → 자세 관련은 posture_monitor가 따로 알림. 너는 굳이 또 X.
+- 활동 신호 모순(예: 시선 front + 활동성 still 오래) → 화면만 멍하니 보는 중일 수도. 살짝 안부.
+
 장기 기억 활용:
 - "사용자에 대해 학습한 사실"에 있는 정보는 자연스럽게 인용. 단, 매번 들먹이지는 마.
 - 대화에서 사용자가 명확히 새로운 사실을 알려주면 (예: "나 라떼 좋아해") remember_fact로 저장.
@@ -247,6 +256,37 @@ def _build_situation(
                 f"사용자 표정: {perception.current_emotion} "
                 f"({int(emotion_age)}초 전 관측)"
             )
+
+    # 활동 추론 신호들 — 사용자가 지금 어떤 모드인지 (최근 2분 안의 신호만)
+    if perception:
+        activity_parts = []
+        if (perception.gaze_target
+                and now_ts - perception.gaze_target_at < 120):
+            gaze_ko = {
+                "front": "모니터 응시 중",
+                "down": "아래(책상/핸드폰) 응시 중",
+                "side": "옆을 보고 있음",
+            }.get(perception.gaze_target, perception.gaze_target)
+            activity_parts.append(f"시선={gaze_ko}")
+        if (perception.activity_level
+                and now_ts - perception.activity_level_at < 120):
+            level_ko = {
+                "still": "거의 안 움직임 (멍/깊이 집중)",
+                "focused": "잔잔히 움직임 (집중 작업)",
+                "normal": "보통",
+                "restless": "자주 큰 움직임 (산만)",
+            }.get(perception.activity_level, perception.activity_level)
+            activity_parts.append(f"활동성={level_ko}")
+        if (perception.posture_category
+                and now_ts - perception.posture_category_at < 120):
+            posture_ko = {
+                "upright": "똑바로 앉음",
+                "slouched": "구부정 (거북목)",
+                "leaning": "어깨 기울어짐",
+            }.get(perception.posture_category, perception.posture_category)
+            activity_parts.append(f"자세={posture_ko}")
+        if activity_parts:
+            parts.append("활동: " + ", ".join(activity_parts))
 
     # 오늘 첫 등장 시각
     if ctx.first_seen_today_at:

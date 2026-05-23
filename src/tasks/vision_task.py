@@ -62,7 +62,8 @@ def _to_rgb(frame):
             return None
     return None
 from src.vision.pose_gestures import (
-    GazeAtMeDetector, HandsUpDetector, HeadNodDetector, HeadShakeDetector,
+    GazeAtMeDetector, GazeTargetClassifier,
+    HandsUpDetector, HeadNodDetector, HeadShakeDetector,
     face_orientation,
 )
 from src.vision.pose_stabilizer import PoseStabilizer
@@ -106,6 +107,7 @@ async def run_vision(
     head_nod_detector: HeadNodDetector | None = None
     head_shake_detector: HeadShakeDetector | None = None
     gaze_detector: GazeAtMeDetector | None = None
+    gaze_target_classifier: GazeTargetClassifier | None = None
     pose_stab: PoseStabilizer | None = None
     hand_gesture: HandGestureDetector | None = None
     if VISION_MODE == "pose":
@@ -114,6 +116,7 @@ async def run_vision(
         head_nod_detector = HeadNodDetector(fps=fps)
         head_shake_detector = HeadShakeDetector(fps=fps)
         gaze_detector = GazeAtMeDetector(fps=fps)
+        gaze_target_classifier = GazeTargetClassifier(fps=fps)
         pose_stab = PoseStabilizer(fps=fps)
         # MediaPipe Hands — CPU에서 손 21 keypoint + 7 카테고리 제스처
         try:
@@ -445,6 +448,13 @@ async def run_vision(
                             emit_event(SensorEvent(
                                 type=SensorEventType.GESTURE_HANDS_UP, data={},
                             ))
+                        # 시선 타깃 분류 (front/down/side) — 활동 추론용.
+                        # face_orientation 분기 밖이라 옆모습도 분류 가능.
+                        if gaze_target_classifier is not None and perception is not None:
+                            target = gaze_target_classifier.process(last_keypoints)
+                            if target is not None and target != perception.gaze_target:
+                                perception.gaze_target = target
+                                perception.gaze_target_at = time.time()
                         # 머리/시선 관련 — 정면일 때만 의미 있음
                         if orientation == "front":
                             if head_nod_detector is not None and head_nod_detector.process(

@@ -32,6 +32,17 @@ class PerceptionState:
     current_emotion: str | None = None
     current_emotion_at: float = 0.0
 
+    # 활동 추론 — agent의 더 똑똑한 판단용.
+    # gaze_target: front(모니터 응시) / down(책상·핸드폰) / side(딴 곳) / None
+    gaze_target: str | None = None
+    gaze_target_at: float = 0.0
+    # activity_level: still(거의 안 움직임) / focused(집중) / normal / restless(산만)
+    activity_level: str | None = None
+    activity_level_at: float = 0.0
+    # posture_category: upright / slouched / leaning / None
+    posture_category: str | None = None
+    posture_category_at: float = 0.0
+
     def update_person(self, bbox: tuple[float, float, float, float] | None,
                       distance_cm: float = -1.0,
                       keypoints: Any = None) -> None:

@@ -16,6 +16,7 @@ import random
 import time
 from dataclasses import dataclass
 
+from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import BEHAVIOR
 from src.face.expressions import WORRIED
@@ -35,6 +36,15 @@ class PostureReading:
     @property
     def is_bad(self) -> bool:
         return self.neck_angle_deg > 25 or abs(self.shoulder_tilt_deg) > 15
+
+    @property
+    def category(self) -> str:
+        """카테고리화 — agent 컨텍스트용. upright/slouched/leaning."""
+        if self.neck_angle_deg > 25:
+            return "slouched"
+        if abs(self.shoulder_tilt_deg) > 15:
+            return "leaning"
+        return "upright"
 
 
 class MockPostureProvider:
@@ -133,9 +143,11 @@ class PostureMonitor:
         self,
         provider: MockPostureProvider | None = None,
         keypoints_provider=None,
+        perception: PerceptionState | None = None,
     ) -> None:
         self.provider = provider or MockPostureProvider()
         self.keypoints_provider = keypoints_provider
+        self.perception = perception
         self.bad_started_at: float | None = None
         self.warn_level: int = 0
 
@@ -162,6 +174,11 @@ class PostureMonitor:
                 reading = self.provider.read()
             log.debug(f"posture: neck={reading.neck_angle_deg:.1f}° "
                       f"shoulder={reading.shoulder_tilt_deg:.1f}°")
+
+            # perception 공유 — agent가 자세 카테고리 인지하도록
+            if self.perception is not None:
+                self.perception.posture_category = reading.category
+                self.perception.posture_category_at = time.time()
 
             if not ctx.user_present:
                 self.bad_started_at = None

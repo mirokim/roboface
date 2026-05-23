@@ -44,7 +44,7 @@ _LM_LOWER_LIP_BOTTOM = 14   # 아랫입술 안쪽 아래 가장자리
 class EmotionMirror:
     def __init__(
         self,
-        confirm_frames: int = 3,
+        confirm_frames: int = 2,
         cooldown_sec: float = 4.0,
     ) -> None:
         self.confirm_frames = confirm_frames
