@@ -158,6 +158,18 @@ class BehaviorConfig:
     agent_interval_sec: float = 15.0        # Claude 결정 주기
     agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
 
+    # 에이전트 vision — 이미지 첨부해 더 풍부한 시각 컨텍스트 (비용 ↑).
+    # True여도 매 tick 첨부 X. 다음 조건 중 하나 만족 시만:
+    #   1) 직전 첨부 후 max_interval_sec 이상 경과
+    #   2) 사용자 표정 변함 (current_emotion 전이)
+    #   3) 활동성 또는 시선 타깃 전이
+    #   4) PRESENCE_NEW 직후 (사람 새로 등장)
+    agent_vision_enabled: bool = True
+    agent_vision_min_interval_sec: float = 60.0    # 첨부 사이 최소 간격
+    agent_vision_max_interval_sec: float = 600.0   # 10분에 한 번은 무조건 첨부
+    agent_vision_jpeg_quality: int = 70            # 0~100. 70이면 320×240 ~10KB
+    agent_vision_max_side_px: int = 480            # 큰 frame은 다운샘플 (비용 절감)
+
     # 인사
     greeting_cooldown_sec: float = 300.0    # 같은 사람에게 5분 안엔 다시 인사 X
 

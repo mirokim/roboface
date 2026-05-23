@@ -179,6 +179,15 @@ _AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Robof
 - speak만 반복 X. 가끔 set_expression으로 표정만 바꾸는 것도 OK.
 - dance는 진짜 신날 때만 (사용자 만세 직후, 좋은 소식 들었을 때 등).
 - 표정 enum 22종 — neutral/happy 외에도 thinking/curious/sleepy/content/proud 등 상황별로 다양하게.
+
+이미지가 첨부될 때:
+- 텍스트 신호로 못 잡는 시각적 단서를 살려. 예: "컵 들고 있네", "노트북에 뭐 보고 있네",
+  "표정이 진짜 피곤해 보인다", "옆에 누가 있네". 단 이미지가 매번 오는 게 아니라
+  특정 시점에만 옴 — 첨부된 그 순간을 자연스럽게 활용.
+- 이미지를 매번 묘사 X. "뭘 보고 있어?" 같은 직접 질문도 X (감시 느낌).
+  관찰을 *동기*로 삼아 짧은 한마디 정도가 좋아.
+- 잘못 본 것 같으면 추측 X — 그냥 침묵 또는 일반 멘트.
+- 이미지 없는 tick에는 텍스트 컨텍스트만으로 평소처럼 판단.
 """
 
 
@@ -387,6 +396,12 @@ class RobotAgent:
         self.servos = servos
         self.get_session_id = get_session_id
         self._last_speak_at = 0.0
+        # 마지막으로 이미지 첨부한 시각 + 그때의 활동 상태 — 변화 감지용
+        self._last_vision_at: float = 0.0
+        self._last_vision_emotion: str | None = None
+        self._last_vision_activity: str | None = None
+        self._last_vision_gaze: str | None = None
+        self._last_user_seen_for_vision: float | None = None
 
     def _should_skip(self) -> bool:
         if not ANTHROPIC_API_KEY:
@@ -427,17 +442,24 @@ class RobotAgent:
         situation = _build_situation(self.ctx, self.perception, work_min)
         loop = asyncio.get_running_loop()
 
+        # 이미지 첨부 여부 결정 + 인코딩 (sync — 무거우면 executor로 옮길 수도)
+        image_b64 = self._maybe_encode_frame()
+
         # multi-turn: 정보 도구(recall)는 결과 회신 후 다시 결정.
         # 행동 도구는 즉시 실행하고 loop 종료.
         messages: list[dict] | None = None
         prompt: str | None = situation
+        # 첫 round에만 이미지 첨부 (이후 round는 tool_result 회신).
+        first_image: str | None = image_b64
         for round_idx in range(_MAX_AGENT_ROUNDS):
             actions, full_messages = await loop.run_in_executor(
                 None,
-                lambda p=prompt, m=messages: conversation._client.generate_with_tools(
-                    p or "", _TOOLS, messages=m,
-                ),
+                lambda p=prompt, m=messages, img=first_image:
+                    conversation._client.generate_with_tools(
+                        p or "", _TOOLS, messages=m, image_b64=img,
+                    ),
             )
+            first_image = None   # 두 번째 round부터는 이미지 다시 X
             if not actions:
                 return
 
@@ -470,6 +492,74 @@ class RobotAgent:
             ]
             prompt = None
         log.debug(f"agent: {_MAX_AGENT_ROUNDS} round 후에도 행동 결정 X — 종료")
+
+    def _maybe_encode_frame(self) -> str | None:
+        """조건 만족 시 perception.last_frame을 JPEG base64로 인코딩.
+
+        조건 (OR):
+          1) 마지막 첨부로부터 max_interval_sec 이상 경과
+          2) 표정/활동성/시선 중 하나가 직전 첨부 때와 달라짐
+          3) 사용자가 새로 등장한 직후 (last_user_seen_at 변함)
+        AND 모두:
+          - agent_vision_enabled True
+          - perception/last_frame 존재
+          - last_frame 30초 이내 (stale 방지)
+          - 마지막 첨부로부터 min_interval_sec 이상 경과
+        """
+        if not BEHAVIOR.agent_vision_enabled:
+            return None
+        if self.perception is None or self.perception.last_frame is None:
+            return None
+        now = time.time()
+        if now - self.perception.last_frame_at > 30:
+            return None
+        # 최소 간격 — 너무 자주 첨부 방지
+        if now - self._last_vision_at < BEHAVIOR.agent_vision_min_interval_sec:
+            return None
+
+        # 변화 감지
+        cur_emotion = self.perception.current_emotion
+        cur_activity = self.perception.activity_level
+        cur_gaze = self.perception.gaze_target
+        cur_user_seen = self.ctx.last_user_seen_at
+
+        changed = (
+            cur_emotion != self._last_vision_emotion
+            or cur_activity != self._last_vision_activity
+            or cur_gaze != self._last_vision_gaze
+            or (cur_user_seen is not None
+                and cur_user_seen != self._last_user_seen_for_vision)
+        )
+        # max interval — 변화 없어도 한 번씩
+        forced = (now - self._last_vision_at) >= BEHAVIOR.agent_vision_max_interval_sec
+
+        if not changed and not forced:
+            return None
+
+        # 인코딩 시도
+        try:
+            from src.brain.image_encoding import encode_jpeg_b64
+            b64 = encode_jpeg_b64(
+                self.perception.last_frame,
+                quality=BEHAVIOR.agent_vision_jpeg_quality,
+                max_side_px=BEHAVIOR.agent_vision_max_side_px,
+            )
+        except Exception as e:
+            log.debug(f"frame 인코딩 실패: {e}")
+            return None
+        if b64 is None:
+            return None
+
+        log.info(
+            f"agent vision attach (changed={changed} forced={forced} "
+            f"size={len(b64) * 3 // 4} B)"
+        )
+        self._last_vision_at = now
+        self._last_vision_emotion = cur_emotion
+        self._last_vision_activity = cur_activity
+        self._last_vision_gaze = cur_gaze
+        self._last_user_seen_for_vision = cur_user_seen
+        return b64
 
     def _run_info_tool(self, action: dict) -> str:
         name = action["name"]

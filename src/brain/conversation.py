@@ -97,6 +97,7 @@ class _ClaudeClient:
         max_tokens: int = 300,
         system: str = SYSTEM_PROMPT,
         messages: list[dict] | None = None,
+        image_b64: str | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """tool use 모드 호출.
 
@@ -113,7 +114,24 @@ class _ClaudeClient:
         if client is None:
             return [], []
         if messages is None:
-            messages = [{"role": "user", "content": user_prompt}]
+            # 이미지가 있으면 image block + text block 함께
+            if image_b64:
+                messages = [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_b64,
+                            },
+                        },
+                        {"type": "text", "text": user_prompt},
+                    ],
+                }]
+            else:
+                messages = [{"role": "user", "content": user_prompt}]
         try:
             response = client.messages.create(
                 model=model,

@@ -23,6 +23,9 @@ class PerceptionState:
     last_person_seen_at: float = 0.0
     # pose 모드의 smoothed keypoints (17, 3) — posture_monitor 등이 참조
     last_pose_keypoints: Any = None
+    # 가장 최근 카메라 frame (numpy HxWx3 RGB) — agent vision용. None 가능.
+    last_frame: Any = None
+    last_frame_at: float = 0.0
 
     # 환경
     temperature_c: float | None = None

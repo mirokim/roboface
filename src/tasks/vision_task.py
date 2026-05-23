@@ -421,6 +421,10 @@ async def run_vision(
             if effective_bbox is not None:
                 try:
                     frame = cam.get_main_frame()
+                    # perception 공유 — agent vision이 이걸 가져다가 Claude로 보냄.
+                    if perception is not None and frame is not None:
+                        perception.last_frame = frame
+                        perception.last_frame_at = time.time()
                     # 제스처 emit 게이트: pose 모드는 stabilizer가 lock된 상태에서만.
                     # detect 모드는 항상 person_confirmed 시 통과.
                     gesture_gate_ok = person_confirmed_this_frame and (
