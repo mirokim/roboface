@@ -32,6 +32,10 @@ class FaceState:
     sweat_intensity: float = 0.0     # 0~1, 얼굴 옆에 땀방울 표시
     shiver_intensity: float = 0.0    # 0~1, 얼굴 좌우 미세 떨림
 
+    # 환경 값 (우하단 오버레이로 표시). None이면 표시 X.
+    env_temp_c: float | None = None
+    env_humidity_pct: float | None = None
+
     # 말풍선 — speech_text가 있고 now < speech_until 이면 상단에 표시
     speech_text: str | None = None
     speech_until: float = 0.0
@@ -116,6 +120,10 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
         # 시간 지남 — 자동 클리어
         face.speech_text = None
         face.speech_until = 0.0
+
+    # 환경 오버레이 — 우하단 작은 텍스트 (얼굴이 밝을 때만, 절전 시엔 X)
+    if face.brightness >= 0.5:
+        extras.draw_env_overlay(canvas, face.env_temp_c, face.env_humidity_pct)
 
     # 녹음 인디케이터
     if face.recording:

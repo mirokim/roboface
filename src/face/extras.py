@@ -51,6 +51,38 @@ def get_font(size: int = 14) -> pygame.font.Font:
     return chosen
 
 
+# ─── 환경 오버레이 (우하단 작은 텍스트) ───
+
+_ENV_FONT_SIZE = 12
+_ENV_PADDING_PX = 4
+
+
+def draw_env_overlay(
+    canvas: pygame.Surface,
+    temp_c: float | None,
+    humidity_pct: float | None,
+) -> None:
+    """우하단에 "24.5° 52%" 형식의 작은 텍스트 표시.
+
+    None인 값은 생략. 둘 다 None이면 아무것도 안 그림.
+    """
+    if temp_c is None and humidity_pct is None:
+        return
+    bits = []
+    if temp_c is not None:
+        bits.append(f"{temp_c:.1f}°")
+    if humidity_pct is not None:
+        bits.append(f"{int(round(humidity_pct))}%")
+    text = " ".join(bits)
+    font = get_font(_ENV_FONT_SIZE)
+    # 흐릿한 회색 — 얼굴 방해 X
+    surf = font.render(text, True, (140, 140, 150))
+    w, h = surf.get_size()
+    x = DISPLAY_WIDTH - w - _ENV_PADDING_PX
+    y = DISPLAY_HEIGHT - h - _ENV_PADDING_PX
+    canvas.blit(surf, (x, y))
+
+
 # ─── 떨림 (shiver) ───
 SHIVER_FREQ_HZ = 7.0
 SHIVER_MAX_PX = 4

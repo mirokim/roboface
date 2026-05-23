@@ -57,3 +57,6 @@ async def run_thermal_state(face: FaceState, perception: PerceptionState) -> Non
         target_sweat, target_shiver = _targets_for(perception.temperature_c)
         face.sweat_intensity += (target_sweat - face.sweat_intensity) * BLEND
         face.shiver_intensity += (target_shiver - face.shiver_intensity) * BLEND
+        # raw 환경 값도 face에 미러 — 우하단 오버레이용
+        face.env_temp_c = perception.temperature_c
+        face.env_humidity_pct = perception.humidity_pct
