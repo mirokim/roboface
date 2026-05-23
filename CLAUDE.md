@@ -197,10 +197,18 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 
 ---
 
-## 7. 현재 진행 (2026-05-17 기준)
+## 7. 현재 진행 (2026-05-24 기준)
 
-- 마이크 미도착 → STT/TTS/wake word 비활성, fake_speak로 시뮬레이션
-- 최근 작업: 옆모습 인식 + Claude 에이전트 도입 + 즉각 반응 강화 (HeadNod 등 엄격화)
-- 다음 후보: 마이크 도착 → voice_assistant 실배포 / journal_writer 깊이 / 새 행동 패턴
+- 마이크 미도착 → STT/TTS/wake word 비활성, fake_speak로 시뮬레이션 (말풍선만 LCD)
+- 최근 작업:
+  - 활동 추론 신호 도입 (gaze_target / activity_level / posture_category)
+  - agent multi-turn (`recall` 도구), 장기 기억 (`remember_fact` + learned_facts 테이블)
+  - agent vision (조건부 카메라 frame 첨부)
+  - 자기 인식 (자기 머리/표정/카메라 일체 사실 컨텍스트 주입)
+  - LCD 우하단 온습도 오버레이
+  - API usage 추적 (_UsageTracker — 비용 가시화, web UI 노출)
+  - mmWave 거리를 perception에 우선 적용 (bbox 추정 ±60cm → mmWave ±5cm)
+  - 발화 텍스트 이모지/괄호 무대지문 strip (`face.show_speech` 단일 통로)
+- 다음 후보: 마이크 도착 → voice_assistant 실배포 / face thread-safety helper / 모듈 분리 (agent.py, memory.py)
 
 스펙/설치는 [docs/parts-list.md](docs/parts-list.md), [docs/setup-pi5.md](docs/setup-pi5.md), [docs/wiring-lcd.md](docs/wiring-lcd.md) 참조.

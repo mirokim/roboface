@@ -501,8 +501,8 @@ class RobotAgent:
             if sid is not None:
                 try:
                     work_min = memory.current_work_duration(sid) / 60
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"work duration 조회 실패: {e}")
         prefix = _build_situation_prefix(self.ctx)
         suffix = _build_situation_suffix(
             self.ctx, self.perception, work_min, face=self.face,
@@ -544,6 +544,13 @@ class RobotAgent:
 
             info_actions = [a for a in actions if a["name"] in _INFO_TOOLS]
             real_actions = [a for a in actions if a["name"] not in _INFO_TOOLS]
+
+            # decision trace — 어떤 결정 내렸는지 한 줄로
+            action_names = [a["name"] for a in actions]
+            log.info(
+                f"agent decision[r{round_idx}]: {', '.join(action_names)}"
+                + (f" (image)" if first_image else "")
+            )
 
             # 행동 액션이 섞여 있으면 그것만 실행하고 종료.
             # (Claude가 recall과 함께 행동까지 한 번에 결정한 경우)
@@ -711,7 +718,7 @@ class RobotAgent:
         log.info(f"🤖 [agent] {text}")
         # 발화는 fake_speak 백그라운드 task로 — face.show_speech 자동
         from src.audio.fake_tts import speak as fake_speak
-        asyncio.create_task(fake_speak(self.face, text))
+        asyncio.create_task(fake_speak(self.face, text), name="agent_fake_speak")
         self.ctx.last_proactive_at = now
         try:
             memory.log_robot(text, kind="agent_speak")
