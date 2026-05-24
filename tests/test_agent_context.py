@@ -112,8 +112,14 @@ def test_time_hint_afternoon_slump():
 
 
 def test_time_hint_none_for_normal_hour():
-    # 평범한 오전 시간대 (9~11시) — 특별한 힌트 없음
-    assert agent._time_hint(datetime(2026, 5, 23, 10, 0)) is None
+    # 평범한 오전 시간대 (9~11시) + 분 3분 이후 — 특별한 힌트 없음
+    assert agent._time_hint(datetime(2026, 5, 23, 10, 30)) is None
+
+
+def test_time_hint_hour_top():
+    # 정시 0~2분 — "방금 N시 정각" 표시
+    h = agent._time_hint(datetime(2026, 5, 23, 10, 1))
+    assert h is not None and "10시" in h
 
 
 # === agent._build_situation — crash 안전성 ===

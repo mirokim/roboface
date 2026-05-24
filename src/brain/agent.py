@@ -285,22 +285,28 @@ def _gather_recent_messages(
 
 
 def _time_hint(now: datetime) -> str | None:
-    """시간대 힌트 — agent가 식사/취침 시간 자연스럽게 챙기도록.
+    """시간대 힌트 — agent가 식사/취침/정시 자연스럽게 챙기도록.
 
     None이면 특별한 시점 아님. agent가 평소처럼 결정.
+    정시(0~2분 안)는 자연스러운 한마디 좋은 시점 — 단 매번 떠들지는 X.
     """
     h, m = now.hour, now.minute
+    bits = []
+    # 정시 직후 (0~2분) — agent가 알아서 결정 (잔소리 금지 가이드 따름)
+    if m <= 2 and h not in (0,):
+        bits.append(f"방금 {h}시 정각")
+    # 시간대
     if 7 <= h < 9:
-        return "이른 아침 — 출근 전후 시점"
-    if h == 11 and m >= 50 or h == 12 or (h == 13 and m < 0):
-        return "점심 시간대"
-    if 14 <= h < 16:
-        return "오후 슬럼프 시간대 — 졸음 잘 옴"
-    if h == 18 and m >= 30 or h == 19:
-        return "저녁 시간대"
-    if h >= 22 or h < 1:
-        return "늦은 밤 — 쉬어야 할 시간"
-    return None
+        bits.append("이른 아침 — 출근 전후 시점")
+    elif h == 11 and m >= 50 or h == 12 or (h == 13 and m < 0):
+        bits.append("점심 시간대")
+    elif 14 <= h < 16:
+        bits.append("오후 슬럼프 시간대 — 졸음 잘 옴")
+    elif h == 18 and m >= 30 or h == 19:
+        bits.append("저녁 시간대")
+    elif h >= 22 or h < 1:
+        bits.append("늦은 밤 — 쉬어야 할 시간")
+    return " · ".join(bits) if bits else None
 
 
 def _build_situation_prefix(ctx: StateContext) -> str:
@@ -317,10 +323,19 @@ def _build_situation_prefix(ctx: StateContext) -> str:
         parts.append(f"오늘 처음 본 시각: {first_seen.strftime('%H:%M')}")
 
     try:
-        facts = memory.all_facts(limit=20)
+        facts = memory.all_facts(limit=30)
         if facts:
-            fact_lines = [f"  - {f['key']}: {f['value']}" for f in facts]
-            parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(fact_lines))
+            self_facts = [f for f in facts if f["key"].startswith("self:")]
+            user_facts = [f for f in facts if not f["key"].startswith("self:")]
+            if self_facts:
+                lines = [
+                    f"  - {f['key'].removeprefix('self:')}: {f['value']}"
+                    for f in self_facts
+                ]
+                parts.append("내 자신에 대해 (페르소나 일관성):\n" + "\n".join(lines))
+            if user_facts:
+                lines = [f"  - {f['key']}: {f['value']}" for f in user_facts]
+                parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(lines))
     except Exception:
         pass
 

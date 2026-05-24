@@ -369,6 +369,46 @@ def recent_conversation(minutes: float = 10.0, limit: int = 20) -> list[dict]:
         return out
 
 
+def remember_fact_if_new(key: str, value: str) -> bool:
+    """key가 없을 때만 INSERT. 이미 있으면 그대로 둠. True면 새로 저장됨.
+
+    로봇 자체 페르소나 facts(시드) 등록용 — 사용자가 학습한 fact를 덮어쓰지 않음.
+    """
+    key = (key or "").strip()
+    value = (value or "").strip()
+    if not key or not value:
+        return False
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO learned_facts(key, value, learned_at) "
+            "VALUES (?, ?, ?)",
+            (key, value, time.time()),
+        )
+        return cur.rowcount > 0
+
+
+# 로봇 자체 페르소나 facts — 부팅 시 시드. self: prefix로 사용자 fact와 구분.
+_ROBOT_PERSONA_FACTS = {
+    "self:좋아하는날씨": "비 오는 날, 흐린 날",
+    "self:좋아하는음료": "따뜻한 차/커피",
+    "self:좋아하는시간대": "늦은 밤, 조용한 시간",
+    "self:싫어하는것": "시끄러운 환경",
+    "self:관심분야": "사용자가 책 읽거나 글 쓸 때",
+    "self:성격": "조용한 동반자, 약간 시니컬하지만 다정, 고양이 톤",
+}
+
+
+def seed_robot_facts() -> int:
+    """로봇 페르소나 facts 시드 — 이미 있으면 skip. 새로 추가된 개수 반환."""
+    added = 0
+    for k, v in _ROBOT_PERSONA_FACTS.items():
+        if remember_fact_if_new(k, v):
+            added += 1
+    if added:
+        log.info(f"로봇 페르소나 facts 시드: {added}개 신규")
+    return added
+
+
 def remember_fact(key: str, value: str) -> None:
     """agent가 학습한 사실 저장/갱신. key가 같으면 value/시각 덮어씀."""
     key = (key or "").strip()

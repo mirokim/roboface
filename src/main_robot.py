@@ -55,6 +55,7 @@ async def run_robot() -> None:
     log.info("=== Roboface (robot mode) 시작 ===")
 
     memory.init_db()
+    memory.seed_robot_facts()   # 로봇 페르소나 facts 시드 (이미 있으면 skip)
 
     face = FaceState(expression=NEUTRAL)
     ctx = StateContext()
@@ -383,7 +384,8 @@ async def _hands_up_back(ctx: StateContext, face: FaceState, servos) -> None:
     try:
         if servos is not None:
             async with motion_busy_scope(ctx):
-                await poses.dance(servos, face, bpm=110, beats=4)
+                # 만세는 신난 거니 dance 유지하되 살짝 부드럽게 (110→90, 4→3)
+                await poses.dance(servos, face, bpm=90, beats=3)
         else:
             await asyncio.sleep(1.5)
         try:
