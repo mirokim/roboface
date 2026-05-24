@@ -29,7 +29,7 @@ from src.utils.logger import get_logger
 log = get_logger("mood_drift")
 
 
-CHECK_INTERVAL_SEC = 30.0
+CHECK_INTERVAL_SEC = 15.0   # 30→15 — 표정 변화 더 자주
 
 # mood가 적용되는 상태들 — 그 외엔 절대 건드리지 않음
 _ELIGIBLE_STATES = (State.IDLE, State.WATCHING)
@@ -52,8 +52,8 @@ def _select_mood(ctx: StateContext, now_ts: float, hour: int) -> Expression:
         since_seen = now_ts - ctx.last_user_seen_at
         if since_seen < 30:
             return random.choices(
-                [expr.HAPPY, expr.CONTENT, expr.STARSTRUCK],
-                weights=[6, 3, 1],
+                [expr.HAPPY, expr.CONTENT, expr.STARSTRUCK, expr.LOVE, expr.WINK],
+                weights=[5, 3, 1, 1, 1],
             )[0]
 
     # 사용자 부재
@@ -63,34 +63,42 @@ def _select_mood(ctx: StateContext, now_ts: float, hour: int) -> Expression:
         else:
             absent = now_ts - ctx.last_user_seen_at
         if absent > 60 * 60:
-            # 1시간+ 부재 → 졸음/하품
+            # 1시간+ 부재 → 졸음/하품/멍
             return random.choices(
-                [expr.SLEEPY, expr.YAWN],
-                weights=[8, 2],
+                [expr.SLEEPY, expr.YAWN, expr.NEUTRAL],
+                weights=[6, 2, 2],
             )[0]
         if absent > 30 * 60:
-            return expr.SLEEPY
+            return random.choices(
+                [expr.SLEEPY, expr.CONTENT, expr.THINKING],
+                weights=[6, 2, 2],
+            )[0]
         if absent > 5 * 60:
             return random.choices(
-                [expr.CONTENT, expr.NEUTRAL, expr.THINKING],
-                weights=[5, 3, 2],
+                [expr.CONTENT, expr.NEUTRAL, expr.THINKING, expr.CURIOUS],
+                weights=[4, 3, 2, 1],
             )[0]
 
-    # 평상시
+    # 평상시 — 풀 더 풍부하게. 자주 안 쓰이는 표정도 가끔.
     if night:
         return random.choices(
-            [expr.SLEEPY, expr.CONTENT],
-            weights=[7, 3],
+            [expr.SLEEPY, expr.CONTENT, expr.THINKING, expr.NEUTRAL],
+            weights=[5, 2, 2, 1],
         )[0]
     if 6 <= hour < 10:
-        # 아침엔 살짝 졸린 듯
+        # 아침엔 살짝 졸린 듯 + 가끔 하품
         return random.choices(
-            [expr.SLEEPY, expr.NEUTRAL, expr.CONTENT],
-            weights=[3, 5, 2],
+            [expr.SLEEPY, expr.NEUTRAL, expr.CONTENT, expr.YAWN, expr.THINKING],
+            weights=[3, 4, 2, 1, 1],
         )[0]
+    # 낮 평상시 — 다양한 표정 섞기 (CURIOUS/WINK/PROUD/LOVE 가끔)
     return random.choices(
-        [expr.NEUTRAL, expr.CONTENT, expr.THINKING, expr.HAPPY],
-        weights=[4, 3, 2, 1],
+        [
+            expr.NEUTRAL, expr.CONTENT, expr.THINKING, expr.HAPPY,
+            expr.CURIOUS, expr.FOCUSED, expr.PROUD,
+            expr.WINK, expr.WINK_R, expr.LOVE,
+        ],
+        weights=[4, 3, 2, 2, 2, 1, 1, 1, 1, 1],
     )[0]
 
 
