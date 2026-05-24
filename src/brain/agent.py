@@ -549,7 +549,7 @@ class RobotAgent:
             action_names = [a["name"] for a in actions]
             log.info(
                 f"agent decision[r{round_idx}]: {', '.join(action_names)}"
-                + (f" (image)" if first_image else "")
+                + (" (image)" if (round_idx == 0 and image_b64) else "")
             )
 
             # 행동 액션이 섞여 있으면 그것만 실행하고 종료.
