@@ -45,11 +45,14 @@ async def speak(face: FaceState, text: str, duration_per_char: float = 0.06) -> 
         from src.audio.tts import speak as tts_speak
         await tts_speak(face, text, tts=tts)
         return
-    # 폴백
-    duration = max(0.5, len(text) * duration_per_char)
-    log.info(f'speaking ({duration:.1f}s): "{text}"')
+    # 폴백 — 발화 시작 전 텍스트 정리 (이모지/괄호 무대지문 제거).
+    # face.show_speech도 같은 strip을 하지만 로그/duration도 정리된 기준으로.
+    from src.face.renderer import strip_emoji
+    clean = strip_emoji(text) or text
+    duration = max(0.5, len(clean) * duration_per_char)
+    log.info(f'speaking ({duration:.1f}s): "{clean}"')
 
-    face.show_speech(text, duration)
+    face.show_speech(clean, duration)
     end = asyncio.get_event_loop().time() + duration
     saved_shape = face.mouth_state.shape
     while asyncio.get_event_loop().time() < end:

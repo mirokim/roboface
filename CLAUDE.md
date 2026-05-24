@@ -200,6 +200,8 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 ## 7. 현재 진행 (2026-05-24 기준)
 
 - 마이크 미도착 → STT/TTS/wake word 비활성, fake_speak로 시뮬레이션 (말풍선만 LCD)
+  - ambient_listener (mock STT) 자체도 비활성 — 가짜 발화로 agent 컨텍스트 오염 방지
+  - posture_monitor의 mock provider fallback도 비활성 — keypoints 없으면 skip
 - 최근 작업:
   - 활동 추론 신호 도입 (gaze_target / activity_level / posture_category)
   - agent multi-turn (`recall` 도구), 장기 기억 (`remember_fact` + learned_facts 테이블)

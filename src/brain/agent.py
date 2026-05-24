@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 from datetime import datetime
 
 from src.brain import conversation, memory
@@ -239,6 +240,29 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
 """
 
 
+def _ttl_cache(key: str, ttl_sec: float, fn):
+    """간단 TTL 캐시 — _build_situation_suffix의 DB 조회 부담 줄임.
+
+    매 15초 tick × 4~5 DB 호출 = 시간당 1200+회를 캐시 hit로 90% 감소.
+    """
+    now = time.time()
+    cached = _SITUATION_CACHE.get(key)
+    if cached is not None:
+        ts, val = cached
+        if now - ts < ttl_sec:
+            return val
+    try:
+        val = fn()
+    except Exception as e:
+        log.debug(f"cache fn 실패 [{key}]: {e}")
+        val = None
+    _SITUATION_CACHE[key] = (now, val)
+    return val
+
+
+_SITUATION_CACHE: dict[str, tuple[float, Any]] = {}
+
+
 def _gather_recent_messages(
     minutes: float | None = None,
     limit: int | None = None,
@@ -416,29 +440,28 @@ def _build_situation_suffix(
     if work_minutes is not None:
         parts.append(f"현재 작업 세션: {int(work_minutes)}분 째")
 
-    # 오늘 누적 작업 시간
-    try:
-        today_total_min = memory.today_total_seconds() / 60
-        if today_total_min >= 1:
-            parts.append(f"오늘 누적 작업: {int(today_total_min)}분")
-    except Exception:
-        pass
+    # 오늘 누적 작업 시간 — 30초 캐시 (분 단위 변화라 충분)
+    today_total_sec = _ttl_cache(
+        "today_total_seconds", 30.0, memory.today_total_seconds,
+    )
+    if today_total_sec is not None and today_total_sec >= 60:
+        parts.append(f"오늘 누적 작업: {int(today_total_sec / 60)}분")
 
     if ctx.last_proactive_at:
         gap = now_ts - ctx.last_proactive_at
         parts.append(f"내가 마지막 발화: {int(gap)}초 전")
 
-    # 최근 fire된 proactive 트리거 (3분 안)
-    try:
-        last_trig = memory.last_proactive_log(within_minutes=3.0)
-        if last_trig:
-            trig_gap = int(now_ts - last_trig["ts"])
-            parts.append(
-                f"최근 트리거({trig_gap}초 전): {last_trig['trigger']} "
-                f"— \"{last_trig['message']}\""
-            )
-    except Exception:
-        pass
+    # 최근 fire된 proactive 트리거 (3분 안) — 5초 캐시
+    last_trig = _ttl_cache(
+        "last_proactive_log", 5.0,
+        lambda: memory.last_proactive_log(within_minutes=3.0),
+    )
+    if last_trig:
+        trig_gap = int(now_ts - last_trig["ts"])
+        parts.append(
+            f"최근 트리거({trig_gap}초 전): {last_trig['trigger']} "
+            f"— \"{last_trig['message']}\""
+        )
 
     parts.append(f"최근 대화:\n{recent}")
 
@@ -449,14 +472,14 @@ def _build_situation_suffix(
     if hint:
         parts.append(f"시간대 힌트: {hint}")
 
-    # 최근 24시간 사용자 표정 요약 (포토 메모리 기반)
-    try:
-        snap_summary = memory.snapshot_summary(hours_back=24.0)
-        if snap_summary:
-            stats = ", ".join(f"{k}={v}" for k, v in snap_summary.items())
-            parts.append(f"최근 24h 사용자 표정 통계: {stats}")
-    except Exception:
-        pass
+    # 최근 24시간 사용자 표정 요약 — 5분 캐시 (시간 단위 변화)
+    snap_summary = _ttl_cache(
+        "snapshot_summary_24h", 300.0,
+        lambda: memory.snapshot_summary(hours_back=24.0),
+    )
+    if snap_summary:
+        stats = ", ".join(f"{k}={v}" for k, v in snap_summary.items())
+        parts.append(f"최근 24h 사용자 표정 통계: {stats}")
 
     # 로봇 자신의 스탯 (Tamagotchi) — 표정 톤에 영향
     try:
@@ -544,7 +567,8 @@ class RobotAgent:
         )
         loop = asyncio.get_running_loop()
 
-        image_b64 = self._maybe_encode_frame()
+        # cv2.imencode은 sync + 30~80ms blocking — executor로 빼서 event loop 보호
+        image_b64 = await loop.run_in_executor(None, self._maybe_encode_frame)
 
         # content blocks: [image?] + [prefix cached] + [suffix]
         # prefix에 cache_control 붙여 5분 TTL 안에 cache hit. suffix는 매번 새로움.
