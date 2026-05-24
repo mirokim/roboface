@@ -84,18 +84,22 @@ async def run_robot() -> None:
         keypoints_provider=lambda: perception.last_pose_keypoints,
         perception=perception,
     )
-    ambient = AmbientListener()
-    ambient.add_handler(schedule_extractor.handle_transcript)
-    ambient.add_handler(journal_writer.handle_transcript)
-
-    # 공유 마이크 — voice_assistant + audio_reactive 둘 다 subscribe
+    # 공유 마이크 — voice_assistant + audio_reactive 둘 다 subscribe.
+    # 마이크 안 잡히면 ambient_listener도 비활성 (mock STT가 가짜 발화로
+    # conversation_log 오염시켜 agent가 헛소리하는 문제 회피).
     shared_mic: Microphone | None = None
     try:
         shared_mic = Microphone(device=AUDIO_INPUT_DEVICE)
         shared_mic.__enter__()  # 시작 (callback 활성)
     except MicCaptureError as e:
-        log.warning(f"마이크 사용 불가 — 음성/박수/음악 기능 비활성: {e}")
+        log.warning(f"마이크 사용 불가 — 음성/박수/음악/ambient 기능 비활성: {e}")
         shared_mic = None
+
+    ambient: AmbientListener | None = None
+    if shared_mic is not None:
+        ambient = AmbientListener()
+        ambient.add_handler(schedule_extractor.handle_transcript)
+        ambient.add_handler(journal_writer.handle_transcript)
 
     bg_tasks = [
         asyncio.create_task(sensors.run(), name="sensors"),
@@ -114,7 +118,6 @@ async def run_robot() -> None:
         asyncio.create_task(work_tracker.run(ctx), name="work_tracker"),
         asyncio.create_task(posture.run(ctx, face), name="posture"),
         asyncio.create_task(run_activity_monitor(perception), name="activity"),
-        asyncio.create_task(ambient.run(), name="ambient"),
         asyncio.create_task(schedule_extractor.sync_pending_to_thinktank(),
                             name="schedule_sync"),
         asyncio.create_task(run_queue_flusher(), name="queue_flusher"),
@@ -166,6 +169,11 @@ async def run_robot() -> None:
                                perception=perception, servos=servos),
             name="audio_reactive",
         ))
+        # 주변 청취 (mock STT는 비활성 — 가짜 발화가 conversation_log 오염)
+        if ambient is not None:
+            bg_tasks.append(
+                asyncio.create_task(ambient.run(), name="ambient"),
+            )
 
     # 시그널 핸들러로 graceful shutdown
     stop_event = asyncio.Event()

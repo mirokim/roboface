@@ -159,10 +159,13 @@ class PostureMonitor:
         return 0
 
     async def run(self, ctx: StateContext, face: FaceState) -> None:
-        """매 30초마다 자세 측정."""
+        """매 30초마다 자세 측정. 실제 keypoints 있을 때만 — mock은 비활성.
+
+        가짜 자세 데이터로 false alert 생성하면 사용자 신뢰 깨짐.
+        실제 신호 들어올 때만 의미 있는 판단.
+        """
         while True:
             await asyncio.sleep(30)
-            # 실제 keypoints 있으면 그걸로, 없으면 mock
             reading: PostureReading | None = None
             if self.keypoints_provider is not None:
                 try:
@@ -171,7 +174,8 @@ class PostureMonitor:
                 except Exception as e:
                     log.debug(f"keypoint 자세 분석 실패: {e}")
             if reading is None:
-                reading = self.provider.read()
+                # 실제 데이터 없음 — mock fallback 안 함. 다음 tick 대기.
+                continue
             log.debug(f"posture: neck={reading.neck_angle_deg:.1f}° "
                       f"shoulder={reading.shoulder_tilt_deg:.1f}°")
 
