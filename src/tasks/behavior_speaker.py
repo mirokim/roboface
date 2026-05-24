@@ -186,19 +186,26 @@ FACE_GREETING_TEMPLATES = (
 
 
 def _claude_situational(event_kind: str, ctx: StateContext, extra: dict | None = None) -> str:
-    """Claude 기반 상황 멘트 — 실패/없으면 빈 문자열."""
+    """Claude 기반 상황 멘트 — 실패/없으면 빈 문자열 (caller가 풀로 fallback).
+
+    빈 문자열 반환 시 caller에서 풀 사용. 명시적 로그는 caller 책임.
+    """
     try:
         recent = memory.recent_conversation(minutes=20.0, limit=8)
     except Exception:
         recent = None
     try:
-        return conversation.generate_situational(
+        msg = conversation.generate_situational(
             event_kind,
             user_name=getattr(ctx, "user_name", None),
             extra=extra,
             recent_dialog=recent,
         )
-    except Exception:
+        if not msg:
+            log.debug(f"situational[{event_kind}]: Claude empty → caller fallback")
+        return msg
+    except Exception as e:
+        log.debug(f"situational[{event_kind}]: Claude 예외 → caller fallback: {e}")
         return ""
 
 
