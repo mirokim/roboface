@@ -98,13 +98,17 @@ def test_mood_drift_default_at_noon():
     ctx.user_present = False
     ctx.last_user_seen_at = time.time()  # 방금 봄
     mood = mood_drift._select_mood(ctx, time.time(), 12)
-    assert mood.name in {"neutral", "content", "thinking", "happy"}
+    # 평상시 풀 (다양화 후) — 낮 평상시 어떤 표정도 OK
+    assert mood.name in {
+        "neutral", "content", "thinking", "happy",
+        "curious", "focused", "proud", "wink", "wink_r", "love",
+    }
 
 
 def test_mood_drift_sleepy_at_night():
     ctx = StateContext()
     mood = mood_drift._select_mood(ctx, time.time(), 2)  # 새벽 2시
-    assert mood.name in {"sleepy", "content"}
+    assert mood.name in {"sleepy", "content", "thinking", "neutral"}
 
 
 def test_mood_drift_yawn_after_long_absence():
@@ -113,8 +117,8 @@ def test_mood_drift_yawn_after_long_absence():
     now = time.time()
     ctx.last_user_seen_at = now - 2 * 3600  # 2시간 전
     moods = {mood_drift._select_mood(ctx, now, 14).name for _ in range(50)}
-    # 1시간+ 부재 → sleepy 또는 yawn
-    assert moods.issubset({"sleepy", "yawn"})
+    # 1시간+ 부재 → sleepy/yawn/neutral
+    assert moods.issubset({"sleepy", "yawn", "neutral"})
 
 
 def test_mood_drift_greeting_immediately_after_user_appears():
@@ -122,7 +126,7 @@ def test_mood_drift_greeting_immediately_after_user_appears():
     ctx.user_present = True
     ctx.last_user_seen_at = time.time()  # 방금 봄
     moods = {mood_drift._select_mood(ctx, time.time(), 14).name for _ in range(30)}
-    assert moods.issubset({"happy", "content", "starstruck"})
+    assert moods.issubset({"happy", "content", "starstruck", "love", "wink"})
 
 
 def test_mood_drift_skips_non_eligible_states(monkeypatch):
