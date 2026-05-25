@@ -38,6 +38,7 @@ from src.tasks.mood_drift import run_mood_drift
 from src.tasks.posture_monitor import PostureMonitor
 from src.tasks.proactive_speaker import run_loop as run_proactive
 from src.tasks.reactive_face import flash_expression
+from src.tasks.daily_fortune import run_daily_fortune
 from src.tasks.daily_recap import run_daily_recap
 from src.tasks.db_cleanup import run_db_cleanup
 from src.tasks.stats_tick import run_stats_tick
@@ -111,6 +112,7 @@ async def run_robot() -> None:
         asyncio.create_task(run_thermal_state(face, perception), name="thermal"),
         asyncio.create_task(run_stats_tick(ctx), name="stats_tick"),
         asyncio.create_task(run_daily_recap(face, ctx), name="daily_recap"),
+        asyncio.create_task(run_daily_fortune(face, ctx), name="daily_fortune"),
         asyncio.create_task(run_db_cleanup(), name="db_cleanup"),
         # Web UI — WEB_UI_PASSWORD 있을 때만 활성. 0.0.0.0:8080 (LAN).
         asyncio.create_task(
