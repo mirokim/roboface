@@ -37,8 +37,26 @@ class HeadPosition:
 class ServoController(ABC):
     """서보 컨트롤러 추상 인터페이스."""
 
+    # 비상 cap — 한 호출당 변화량 한계. 정상 동작은 영향 X:
+    # home 45°, look_around 30°, dance amp ±15°, head_tracker step ±8°.
+    # 비정상(버그/agent 오작동/발산)으로 큰 점프 명령이 와도 ±50°만 진행.
+    _MAX_DELTA_PER_CALL_DEG = 50.0
+
     def __init__(self) -> None:
         self.position = HeadPosition()
+
+    def _safe_clamp(self, pan: float, tilt: float) -> tuple[float, float]:
+        """비상 변화 cap. subclass set_angles 안에서 호출. log.warning으로 알림."""
+        d_pan = pan - self.position.pan
+        d_tilt = tilt - self.position.tilt
+        cap = self._MAX_DELTA_PER_CALL_DEG
+        if abs(d_pan) > cap:
+            log.warning(f"servo pan delta {d_pan:+.1f}° → clamp ±{cap:.0f}")
+            pan = self.position.pan + (cap if d_pan > 0 else -cap)
+        if abs(d_tilt) > cap:
+            log.warning(f"servo tilt delta {d_tilt:+.1f}° → clamp ±{cap:.0f}")
+            tilt = self.position.tilt + (cap if d_tilt > 0 else -cap)
+        return pan, tilt
 
     @abstractmethod
     def set_angles(self, pan: float, tilt: float) -> None: ...
@@ -94,6 +112,7 @@ class MockServoController(ServoController):
     def set_angles(self, pan: float, tilt: float) -> None:
         pan = _clamp(pan, PAN_MIN_DEG, PAN_MAX_DEG)
         tilt = _clamp(tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+        pan, tilt = self._safe_clamp(pan, tilt)
         if abs(pan - self.position.pan) > 0.5 or abs(tilt - self.position.tilt) > 0.5:
             log.debug(f"[MockServo] pan={pan:.1f}° tilt={tilt:.1f}°")
         self.position.pan = pan
@@ -126,6 +145,7 @@ class PCA9685ServoController(ServoController):
     def set_angles(self, pan: float, tilt: float) -> None:
         pan = _clamp(pan, PAN_MIN_DEG, PAN_MAX_DEG)
         tilt = _clamp(tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+        pan, tilt = self._safe_clamp(pan, tilt)
         # 명령 보낼 때만 신호 재활성 + 시간 갱신
         moved = (
             abs(pan - self.position.pan) > 0.5

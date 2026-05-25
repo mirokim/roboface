@@ -157,6 +157,7 @@ class BehaviorConfig:
     # 에이전트 결정 주기
     agent_interval_sec: float = 15.0        # Claude 결정 주기
     agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
+    agent_dance_min_gap_sec: float = 120.0  # 에이전트 dance 사이 최소 간격 (격렬 방지)
 
     # 에이전트 vision — 이미지 첨부해 더 풍부한 시각 컨텍스트 (비용 ↑).
     # True여도 매 tick 첨부 X. 다음 조건 중 하나 만족 시만:

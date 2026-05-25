@@ -551,6 +551,7 @@ class RobotAgent:
         self.servos = servos
         self.get_session_id = get_session_id
         self._last_speak_at = 0.0
+        self._last_dance_at = 0.0   # 격렬 동작 방지 cooldown
         # 마지막으로 이미지 첨부한 시각 + 그때의 활동 상태 — 변화 감지용
         self._last_vision_at: float = 0.0
         self._last_vision_emotion: str | None = None
@@ -830,11 +831,19 @@ class RobotAgent:
     async def _do_dance(self, inp: dict) -> None:
         if self.servos is None:
             return
-        beats = int(inp.get("beats", 4))
-        bpm = int(inp.get("bpm", 120))
+        # cooldown — 격렬 동작 방지
+        now = time.time()
+        if now - self._last_dance_at < BEHAVIOR.agent_dance_min_gap_sec:
+            remain = BEHAVIOR.agent_dance_min_gap_sec - (now - self._last_dance_at)
+            log.info(f"agent dance skip — cooldown {remain:.0f}s 남음")
+            return
+        # 진폭/길이 cap — agent가 큰 값 보내도 자동 제한
+        beats = max(2, min(int(inp.get("beats", 4)), 4))   # 최대 4 beats
+        bpm = max(70, min(int(inp.get("bpm", 100)), 110))   # 70~110 BPM
         log.info(f"🤖 [agent] dance ({beats} beats @ {bpm} BPM)")
         from src.motion import poses
         try:
+            self._last_dance_at = now
             async with motion_busy_scope(self.ctx):
                 await poses.dance(self.servos, self.face, bpm=bpm, beats=beats)
         except Exception as e:
