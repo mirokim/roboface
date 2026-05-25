@@ -166,6 +166,15 @@ class PostureMonitor:
         """
         while True:
             await asyncio.sleep(30)
+
+            # 사용자 부재 시 누적 reset — keypoints/reading 있든 없든 먼저 체크.
+            # (이전 버그: reading is None인 부재 상태에서 reset 안 돼 옛 bad_started_at
+            # 그대로 → 사용자 복귀 시 "2시간째 그 자세" 같은 잘못된 알림)
+            if not ctx.user_present:
+                self.bad_started_at = None
+                self.warn_level = 0
+                continue
+
             reading: PostureReading | None = None
             if self.keypoints_provider is not None:
                 try:
@@ -183,11 +192,6 @@ class PostureMonitor:
             if self.perception is not None:
                 self.perception.posture_category = reading.category
                 self.perception.posture_category_at = time.time()
-
-            if not ctx.user_present:
-                self.bad_started_at = None
-                self.warn_level = 0
-                continue
 
             if reading.is_bad:
                 if self.bad_started_at is None:
