@@ -28,13 +28,14 @@ from src.utils.logger import get_logger
 log = get_logger("head_tracker")
 
 
-# 추적 파라미터 — 적극적이지만 자잘한 움직임 X
+# 추적 파라미터 — 적극적이지만 자잘한 움직임 X.
+# MAX_STEP_DEG × UPDATE_HZ = 초당 최대 회전 속도. 사람 자연 ~60°/sec.
 UPDATE_HZ = 15
-SMOOTHING_ALPHA = 0.2
+SMOOTHING_ALPHA = 0.15   # 0.2 → 0.15 (더 천천히 수렴 — 격렬 점프 완화)
 PAN_RANGE_DEG = 70
 TILT_RANGE_DEG = 30
 RETURN_TO_CENTER_AFTER_SEC = 3
-MAX_STEP_DEG = 8.0
+MAX_STEP_DEG = 4.0   # 8 → 4 (60°/sec — 격렬 회전 방지. 사용자가 고개 숙였다 올릴 때 봇이 휙 따라가는 거 차단)
 
 # 데드존 — 자잘한 떨림 방지를 위한 3단계:
 # 1) bbox 센터 자체 N프레임 평균 (입력 노이즈 제거)
