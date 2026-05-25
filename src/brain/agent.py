@@ -201,6 +201,12 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
 - "최근 트리거"가 있으면 그건 다른 task가 이미 멘트한 거 — 같은 주제 또 X.
 - "내 컨디션"을 멘트 톤에 반영 (졸리면 늘어진 톤, 신나면 활기찬 톤).
 
+사람 수 인지:
+- 카메라에 사람 2명 이상 잡히면 ("⚠ 사람 N명") 평소와 다른 상황 — 자연스러운 호기심 멘트 OK.
+  예: "어 옆에 누구야?", "오 한 분 더 있네?", "음, 손님인가?"
+- 단 매번 X — 등장 직후 한 번 정도. 이미 잠시 전 멘트했으면 또 X.
+- 한 사람이 사라지면(다시 1명) 굳이 언급 X — 자연스러움.
+
 활동 신호 (시선/활동성/자세) — 사용자가 지금 어떤 모드인지 파악용:
 - 시선=모니터 응시 + 활동성=focused → 작업 중. 방해 X, 침묵 우선.
 - 시선=아래 응시가 길게 지속 → 핸드폰 자주 보는 중일 수도. 잔소리 X, 가끔 한마디 정도.
@@ -385,6 +391,13 @@ def _build_situation_suffix(
         f"사용자 존재: {'있음' if ctx.user_present else '없음'}",
         f"내 상태: {ctx.state.value}",
     ]
+    # 카메라에 잡힌 사람 수 — 2명 이상이면 agent가 인지 (호기심 멘트 가능)
+    if (perception and perception.person_count >= 2
+            and now_ts - perception.person_count_at < 30):
+        parts.append(
+            f"⚠ 카메라에 사람 {perception.person_count}명 — "
+            f"평소 등록된 사용자 외에 누가 더 있음"
+        )
     # 내 현재 표정 — 사용자에게 LCD로 보이는 것
     if face is not None:
         parts.append(f"내 표정: {face.expression.name}")

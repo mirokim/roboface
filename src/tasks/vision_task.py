@@ -181,6 +181,9 @@ async def run_vision(
                     d for d in detections
                     if d.class_name == "person" and d.confidence >= person_filter_conf
                 ]
+                # 카메라에 동시에 잡힌 사람 수 — agent가 "두 명 있네" 같은 인지
+                perception.person_count = len(person_dets)
+                perception.person_count_at = time.time()
                 # 5초마다 진단 로그 — 제스처 인식 안 될 때 어디서 막혔는지 즉시 파악.
                 now_dt = time.time()
                 if now_dt - last_diag_log_at > 5.0:

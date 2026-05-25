@@ -21,6 +21,9 @@ class PerceptionState:
     person_bbox: tuple[float, float, float, float] | None = None
     person_distance_cm: float = -1.0
     last_person_seen_at: float = 0.0
+    # 카메라에 동시에 잡힌 사람 수 (raw detection). 1보다 크면 두 명 이상 있음.
+    person_count: int = 0
+    person_count_at: float = 0.0
     # pose 모드의 smoothed keypoints (17, 3) — posture_monitor 등이 참조
     last_pose_keypoints: Any = None
     # 가장 최근 카메라 frame (numpy HxWx3 RGB) — agent vision용. None 가능.
