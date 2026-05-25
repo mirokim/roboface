@@ -625,11 +625,21 @@ async def run_vision(
                 except Exception as e:
                     log.warning(f"vision frame 분석 에러: {e}")
             else:
+                # 사람 안 보임 — 모든 detector 누적 reset.
+                # 빠지면 옛 데이터 + 새 데이터 섞여 false positive 가능 (제스처/시선 등).
                 wave_detector.reset()
                 if pose_stab is not None:
                     pose_stab.reset()
                 if hands_up_detector is not None:
                     hands_up_detector.reset()
+                if head_nod_detector is not None:
+                    head_nod_detector.reset()
+                if head_shake_detector is not None:
+                    head_shake_detector.reset()
+                if gaze_detector is not None:
+                    gaze_detector.reset()
+                if gaze_target_classifier is not None:
+                    gaze_target_classifier.reset()
                 last_recognized = None
                 last_distance_for_comment = None
                 if ctx is not None and ctx.user_name:

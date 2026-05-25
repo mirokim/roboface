@@ -81,12 +81,20 @@ async def run_activity_monitor(perception: PerceptionState) -> None:
     window: deque[tuple[float, float, float, float]] = deque(maxlen=WINDOW_SAMPLES)
     log.info("activity monitor 시작")
     last_label: str | None = None
+    miss_count = 0
     while True:
         await asyncio.sleep(SAMPLE_INTERVAL_SEC)
         sample = _sample(perception.last_pose_keypoints)
         if sample is None:
-            # 사람 없거나 keypoint 부족 — 윈도우는 살아있되 갱신 X
+            # 사람 없거나 keypoint 부족. 연속 2회(20초) miss 시 윈도우 reset:
+            # 옛 위치 + 새 위치(복귀 후) 섞이면 std 폭주해 'restless' 잘못 인식.
+            miss_count += 1
+            if miss_count >= 2 and window:
+                window.clear()
+                last_label = None
+                perception.activity_level = None
             continue
+        miss_count = 0
         window.append(sample)
         if len(window) < WINDOW_SAMPLES:
             continue
