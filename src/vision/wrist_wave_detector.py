@@ -2,12 +2,15 @@
 
 기존 motion centroid 방식보다 훨씬 정확:
 - 손목 x좌표 직접 트래킹 (배경/전신 모션 영향 X)
+- 어깨 중심 기준 상대 좌표 — 카메라(머리 부착) 흔들림 자동 상쇄
 - 어깨 너비로 정규화 — 거리에 무관한 진폭 비교
 - 손이 어깨 위로 올라온 경우만 카운트 (인사 wave는 손을 들고 하는 동작)
 
 알고리즘:
 1. 매 프레임 keypoints에서 좌/우 손목 (idx 9, 10) + 좌/우 어깨 (5, 6) 추출
-2. 손목이 어깨보다 위에 있고 confidence 충분하면 push (정규화 x좌표)
+2. 손목이 어깨보다 위에 있고 confidence 충분하면 push
+   — wrist_x - shoulder_mid_x (상대 좌표) 사용. ambient sway/head tracking 시
+     화면 전체가 시프트해도 손목과 어깨가 함께 움직여 차분 시 0.
 3. 양손 중 더 active한 쪽 (분산 큰 쪽) 시계열로 평가
 4. 진폭 ≥ min_amplitude * 어깨너비 + zero crossings 범위 안 → wave!
 """
@@ -186,6 +189,7 @@ class WristWaveDetector:
         if shoulder_width < 0.02:   # 너무 좁음 — 옆모습이거나 노이즈
             return False
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
+        shoulder_mid_x = float((l_shoulder[0] + r_shoulder[0]) / 2)
         self.last_shoulder_y = shoulder_y
         # 손이 어깨 라인 *위* 또는 어깨너비×0.1(어깨 바로 옆) 이내일 때만 카운트.
         # 실측: 책상 타이핑/마우스 손이 어깨 아래 가슴-배 부근에서 ±15cm 흔들리며
@@ -194,7 +198,10 @@ class WristWaveDetector:
         max_below = shoulder_width * 0.1
         self.frames_seen += 1
 
-        # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때
+        # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때.
+        # 카메라가 머리에 달려있어 ambient sway/추적 시 화면 전체가 같이 시프트 →
+        # 손목 절대 x는 카메라 흔들림과 wave가 섞임. 어깨 중심 기준 상대 좌표로
+        # 저장해 공통 모션 자동 상쇄 (어깨도 동일하게 시프트되므로).
         pushed_any = False
         for wrist, history in (
             (l_wrist, self.left_history),
@@ -206,7 +213,7 @@ class WristWaveDetector:
             if wrist[1] > shoulder_y + max_below:   # 허리 아래 — 무시
                 self.reject_below_legs += 1
                 continue
-            history.append(float(wrist[0]))
+            history.append(float(wrist[0]) - shoulder_mid_x)
             pushed_any = True
 
         if pushed_any:

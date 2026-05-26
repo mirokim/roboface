@@ -114,3 +114,24 @@ def test_reset_clears_history():
     det.reset()
     assert len(det.left_history) == 0
     assert len(det.right_history) == 0
+
+
+def test_camera_pan_not_mistaken_for_wave():
+    """카메라(머리)가 좌우 sway 중일 때 손목과 어깨가 함께 시프트해도
+    wave로 오인하지 않아야 함. 손목이 어깨 기준으로는 정지 상태이므로."""
+    det = WristWaveDetector(fps=10, history_sec=1.5)
+    hits = 0
+    # ambient sway 시뮬 — 화면 전체가 좌우로 ±0.08(어깨너비의 40%) 진동.
+    # 손목은 어깨로부터 항상 +0.05 위치 (어깨 기준 정지).
+    for i in range(30):
+        camera_shift = math.sin(i * math.pi / 3) * 0.08
+        sh_l = 0.4 + camera_shift
+        sh_r = 0.6 + camera_shift
+        wrist_x = ((sh_l + sh_r) / 2) + 0.05   # 어깨 중심 기준 항상 +0.05
+        kps = _build_keypoints(
+            wrist_x, wrist_y=0.3,
+            shoulder_l_x=sh_l, shoulder_r_x=sh_r,
+        )
+        if det.process(kps):
+            hits += 1
+    assert hits == 0, f"카메라 흔들림을 wave로 오인 ({hits}회)"
