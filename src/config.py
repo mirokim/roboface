@@ -175,8 +175,8 @@ class BehaviorConfig:
     greeting_cooldown_sec: float = 300.0    # 같은 사람에게 5분 안엔 다시 인사 X
 
     # 대화 기록
-    history_recent_window_min: float = 15.0   # 에이전트가 보는 직전 대화 윈도우
-    history_recent_turns: int = 6             # 에이전트가 보는 직전 턴 수
+    history_recent_window_min: float = 60.0   # 에이전트가 보는 직전 대화 윈도우
+    history_recent_turns: int = 20            # 에이전트가 보는 직전 턴 수
     history_voice_turns: int = 6              # voice_assistant 컨텍스트 턴 수
 
     # 발화 표시

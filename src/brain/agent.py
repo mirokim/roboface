@@ -26,7 +26,7 @@ from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
-from src.config import ANTHROPIC_API_KEY, BEHAVIOR
+from src.config import ANTHROPIC_API_KEY, BEHAVIOR, CLAUDE_MODEL_HEAVY
 from src.face import expressions as expr
 from src.face.expressions import EXPRESSIONS_BY_NAME
 from src.face.renderer import FaceState
@@ -295,6 +295,23 @@ def _gather_recent_messages(
     return "\n".join(lines)
 
 
+def _gather_my_recent_speech(
+    minutes: float | None = None,
+    limit: int = 15,
+) -> str:
+    """robot 본인 발화만 따로 — 반복 회피용. 최근 순(위가 가장 최신)."""
+    if minutes is None:
+        minutes = BEHAVIOR.history_recent_window_min
+    try:
+        msgs = memory.recent_robot_messages(minutes=minutes)
+    except Exception:
+        return "(없음)"
+    if not msgs:
+        return "(없음)"
+    msgs = msgs[:limit]
+    return "\n".join(f"  - {t}" for t in msgs)
+
+
 def _time_hint(now: datetime) -> str | None:
     """시간대 힌트 — agent가 식사/취침/정시 자연스럽게 챙기도록.
 
@@ -522,11 +539,20 @@ def _build_situation_suffix(
     except Exception:
         pass
 
+    # 자기 발화 별도 섹션 — recency bias 활용 위해 closing 직전.
+    # 모델이 "내가 최근에 뭐라 했지"를 명확히 인지하도록 사용자 발화와 분리.
+    my_recent = _gather_my_recent_speech()
+    parts.append("")
+    parts.append(
+        "내가 최근 한 말 (절대 그대로 반복 X — 같은 주제도 다른 표현/각도로):\n"
+        + my_recent
+    )
+
     parts.append("")
     parts.append(
         "지금 무엇을 할지 도구를 호출해서 결정해. "
         "특별히 말할 거 없으면 do_nothing이 좋음. "
-        "이미 최근에 비슷한 말 했으면 또 하지 마. "
+        "위 '내가 최근 한 말' 목록 꼭 확인 — 비슷한 말 반복하면 사용자가 바로 알아챔. "
         "오래 앉아있었으면 가끔 쉬자고 말해도 좋아. "
         "내 컨디션도 멘트 톤에 반영해줘 — 졸리면 늘어진 톤, "
         "외로우면 살짝 그리워하는 톤, 신나면 활기찬 톤."
@@ -629,7 +655,7 @@ class RobotAgent:
             actions, full_messages = await loop.run_in_executor(
                 None,
                 lambda m=messages: conversation._client.generate_with_tools(
-                    "", _TOOLS, messages=m,
+                    "", _TOOLS, messages=m, model=CLAUDE_MODEL_HEAVY,
                 ),
             )
             if not actions:
