@@ -627,20 +627,61 @@ class RobotAgent:
         return False
 
     async def run(self, interval_sec: float | None = None) -> None:
+        """Polling 루프 — 2초마다 신호 스냅샷 비교.
+
+        tick 발동 조건 (둘 중 하나):
+          - interval_sec(기본 30s) 도달 — 평소 idle 점검
+          - perception 신호 변화 감지 (emotion/gaze/activity/person_count/posture)
+            AND 최소 trigger gap(5s) 경과 — 빠른 표정 변화 burst에서 rate-limit 보호
+
+        결과: 평균 30s 주기 유지하면서 변화 순간엔 즉시 반응 (2~5초 latency).
+        """
         if interval_sec is None:
             interval_sec = BEHAVIOR.agent_interval_sec
         if not ANTHROPIC_API_KEY:
             log.info("agent 비활성 — ANTHROPIC_API_KEY 없음")
             return
-        log.info(f"robot agent 시작 (interval={interval_sec}s)")
+        log.info(f"robot agent 시작 (interval={interval_sec}s, change-triggered)")
+        poll_sec = 2.0
+        trigger_min_gap_sec = 5.0   # 변화 감지 시 최소 cooldown (연속 burst 방지)
+        last_tick_at = 0.0
+        last_signals = self._snapshot_signals()
         while True:
-            await asyncio.sleep(interval_sec)
+            await asyncio.sleep(poll_sec)
             if self._should_skip():
+                last_signals = self._snapshot_signals()
                 continue
+            now = time.time()
+            cur_signals = self._snapshot_signals()
+            elapsed = now - last_tick_at
+            changed = cur_signals != last_signals
+            should_tick = (
+                elapsed >= interval_sec
+                or (changed and elapsed >= trigger_min_gap_sec)
+            )
+            if not should_tick:
+                continue
+            if changed and elapsed < interval_sec:
+                log.info(f"agent tick: 변화 트리거 (elapsed={elapsed:.0f}s)")
             try:
                 await self._tick()
+                last_tick_at = now
             except Exception as e:
                 log.warning(f"agent tick 에러: {e}")
+            last_signals = cur_signals
+
+    def _snapshot_signals(self) -> tuple:
+        """현재 perception 신호 스냅샷 — 변화 감지용. None도 의미있는 값으로 취급."""
+        p = self.perception
+        if p is None:
+            return ()
+        return (
+            p.current_emotion,
+            p.gaze_target,
+            p.activity_level,
+            p.person_count,
+            p.posture_category,
+        )
 
     async def _tick(self) -> None:
         work_min: float | None = None
