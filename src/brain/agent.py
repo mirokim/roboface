@@ -26,7 +26,7 @@ from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
-from src.config import ANTHROPIC_API_KEY, BEHAVIOR, CLAUDE_MODEL_HEAVY
+from src.config import ANTHROPIC_API_KEY, BEHAVIOR
 from src.face import expressions as expr
 from src.face.expressions import EXPRESSIONS_BY_NAME
 from src.face.renderer import FaceState
@@ -730,7 +730,7 @@ class RobotAgent:
             actions, full_messages = await loop.run_in_executor(
                 None,
                 lambda m=messages: conversation._client.generate_with_tools(
-                    "", _TOOLS, messages=m, model=CLAUDE_MODEL_HEAVY,
+                    "", _TOOLS, messages=m,
                 ),
             )
             if not actions:
