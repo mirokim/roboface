@@ -259,7 +259,9 @@ def _handle_sensor_event(
             kind="presence_new",
         )
         robot_stats.on_event("presence_new")
-        if absence_sec > 30 or first_time:
+        # 30→180 — 화장실/물 한 잔 정도(1~2분)는 굳이 인사 X. 진짜 한참 자리 비웠다
+        # 돌아왔을 때만(3분+). 첫 부팅은 예외.
+        if absence_sec > 180 or first_time:
             behavior_speaker.say(
                 face, ctx,
                 behavior_speaker.reappear_message(absence_sec, ctx),

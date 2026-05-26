@@ -36,7 +36,9 @@ class PersonDetector:
     # 튜닝 파라미터
     person_class: str = "person"
     confirm_frames: int = 3       # AWAY → PRESENT 전이에 필요한 연속 감지 프레임
-    away_timeout_sec: float = 10.0  # 마지막 감지 후 N초 미감지면 AWAY (자세 변화/잠깐 사각 흡수)
+    # 10→30 — 컵 들어 가리거나 의자 잠깐 빠지는 정도(10~20s)는 LEFT로 보지 말 것.
+    # 진짜 자리 비움(다른 방 이동 등)만 잡힘.
+    away_timeout_sec: float = 30.0
     min_confidence: float = 0.5   # 사람 인정 최소 신뢰도 (pose 모드는 0.3 권장)
 
     # 내부 상태
