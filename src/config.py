@@ -154,8 +154,9 @@ class BehaviorConfig:
     idle_screen_dim_after_sec: int = 300    # 5분 부재
     idle_screen_off_after_sec: int = 1800   # 30분 부재
 
-    # 에이전트 결정 주기
-    agent_interval_sec: float = 15.0        # Claude 결정 주기
+    # 에이전트 결정 주기 — 15→30. anchor 룰 도입으로 어차피 4-5번에 1번만 speak.
+    # tick 자체를 줄여 신호 없는 결정 빈도 감소 + 비용 절감.
+    agent_interval_sec: float = 30.0        # Claude 결정 주기
     agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
     agent_dance_min_gap_sec: float = 120.0  # 에이전트 dance 사이 최소 간격 (격렬 방지)
 
@@ -166,8 +167,8 @@ class BehaviorConfig:
     #   3) 활동성 또는 시선 타깃 전이
     #   4) PRESENCE_NEW 직후 (사람 새로 등장)
     agent_vision_enabled: bool = True
-    agent_vision_min_interval_sec: float = 60.0    # 첨부 사이 최소 간격
-    agent_vision_max_interval_sec: float = 600.0   # 10분에 한 번은 무조건 첨부
+    agent_vision_min_interval_sec: float = 30.0    # 60→30. 시각 단서 더 자주 확보
+    agent_vision_max_interval_sec: float = 300.0   # 600→300. 5분에 한 번은 무조건 첨부
     agent_vision_jpeg_quality: int = 70            # 0~100. 70이면 320×240 ~10KB
     agent_vision_max_side_px: int = 480            # 큰 frame은 다운샘플 (비용 절감)
 

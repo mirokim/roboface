@@ -216,6 +216,9 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
 침묵은 어색한 게 아니라 사람이 옆에 가만히 있는 자연스러움.
 
 컨텍스트 활용:
+- "내 직전 발화 후 사용자 변화"가 컨텍스트에 있으면 — 그게 가장 강한 신호.
+  - 변화 있음(표정/시선/활동성 전이) → 멘트가 가닿음. 이어가도 OK (단 같은 말 반복 X).
+  - 변화 없음 → 사용자 무반응. 같은 톤/주제 또 X. 잠깐 침묵 또는 완전 다른 anchor 찾기.
 - "사용자 표정"이 sad/surprised면 그에 맞는 짧은 한마디 (sad엔 위로 한 줄, surprised엔 같이 놀라거나 가벼운 호기심).
 - "오늘 처음 본 시각"이 방금이면 인사 무드. 이미 한참 됐으면 새 인사 X.
 - "부재 시간"이 길었으면 짧게 반김.
@@ -607,6 +610,10 @@ class RobotAgent:
         self._last_vision_activity: str | None = None
         self._last_vision_gaze: str | None = None
         self._last_user_seen_for_vision: float | None = None
+        # 발화 직후 baseline — 다음 tick에 사용자 반응 비교용.
+        # (표정/시선/활동 변화 = 멘트가 가닿았다는 신호)
+        self._post_speak_baseline: dict | None = None
+        self._last_speak_text: str | None = None
 
     def _should_skip(self) -> bool:
         if not ANTHROPIC_API_KEY:
@@ -648,6 +655,10 @@ class RobotAgent:
         suffix = _build_situation_suffix(
             self.ctx, self.perception, work_min, face=self.face,
         )
+        # 직전 발화 후 사용자 반응 — 있으면 suffix 앞쪽에 prepend (눈에 띄게)
+        reaction = self._post_speak_reaction_text()
+        if reaction:
+            suffix = reaction + "\n\n" + suffix
         loop = asyncio.get_running_loop()
 
         # cv2.imencode은 sync + 30~80ms blocking — executor로 빼서 event loop 보호
@@ -862,10 +873,50 @@ class RobotAgent:
         from src.audio.fake_tts import speak as fake_speak
         asyncio.create_task(fake_speak(self.face, text), name="agent_fake_speak")
         self.ctx.last_proactive_at = now
+        # 발화 직후 사용자 baseline 캡처 — 다음 tick에 변화 비교
+        if self.perception is not None:
+            self._post_speak_baseline = {
+                "emotion": self.perception.current_emotion,
+                "gaze": self.perception.gaze_target,
+                "activity": self.perception.activity_level,
+            }
+            self._last_speak_text = text
         try:
             memory.log_robot(text, kind="agent_speak")
         except Exception:
             pass
+
+    def _post_speak_reaction_text(self) -> str | None:
+        """직전 발화(60초 이내) 후 사용자 반응 요약 — 컨텍스트에 추가용.
+
+        baseline 대비 emotion/gaze/activity 변화가 있으면 "반응 있음",
+        없으면 "반응 없음". 60초 지나면 None (의미 없는 비교 방지).
+        """
+        if self._post_speak_baseline is None:
+            return None
+        now = time.time()
+        elapsed = now - self._last_speak_at
+        if elapsed > 60 or elapsed < 1:
+            return None
+        if self.perception is None:
+            return None
+        base = self._post_speak_baseline
+        cur_emotion = self.perception.current_emotion
+        cur_gaze = self.perception.gaze_target
+        cur_activity = self.perception.activity_level
+        changes: list[str] = []
+        if cur_emotion != base["emotion"]:
+            changes.append(f"표정 {base['emotion'] or '?'} → {cur_emotion or '?'}")
+        if cur_gaze != base["gaze"]:
+            changes.append(f"시선 {base['gaze'] or '?'} → {cur_gaze or '?'}")
+        if cur_activity != base["activity"]:
+            changes.append(
+                f"활동성 {base['activity'] or '?'} → {cur_activity or '?'}"
+            )
+        prefix = f"내 직전 발화 ({int(elapsed)}초 전) \"{self._last_speak_text}\" 이후 사용자 변화"
+        if changes:
+            return f"{prefix}: {', '.join(changes)} (멘트가 가닿은 듯 — 흐름 살릴지 판단)"
+        return f"{prefix}: 변화 없음 (사용자 무반응 — 같은 톤 반복 피해)"
 
     def _do_set_expression(self, inp: dict) -> None:
         expr_name = inp.get("expression")
