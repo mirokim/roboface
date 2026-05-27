@@ -1,0 +1,5 @@
+# Linux에서 실행되는 파일은 LF 강제 (Windows에서 편집해도 Pi에서 깨지지 않게)
+*.sh        text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf
+*.py        text eol=lf
