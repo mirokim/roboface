@@ -1,0 +1,13 @@
+[Unit]
+Description=Roboface auto-update (git pull + restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=miro
+Group=miro
+WorkingDirectory=/home/miro/roboface
+ExecStart=/home/miro/roboface/scripts/auto_update.sh
+# 너무 오래 매달리지 않게
+TimeoutStartSec=120

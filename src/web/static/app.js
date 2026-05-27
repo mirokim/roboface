@@ -169,6 +169,25 @@ $('cmd-face-btn').addEventListener('click', async () => {
   } catch (e) { showResult(e.message, false); }
 });
 
+$('cmd-update-btn').addEventListener('click', async () => {
+  if (!confirm('git pull 받고 변경 있으면 봇 재시작. 진행?')) return;
+  const btn = $('cmd-update-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⟳ 업데이트 중...';
+  try {
+    const r = await post('/api/update', {});
+    showResult(r.msg || '업데이트 트리거됨');
+  } catch (e) {
+    showResult(e.message, false);
+  } finally {
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }, 5000);
+  }
+});
+
 $('refresh-conv').addEventListener('click', loadConversation);
 $('refresh-snaps').addEventListener('click', loadSnapshots);
 

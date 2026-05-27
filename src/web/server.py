@@ -331,6 +331,38 @@ async def api_snapshot_now(request):
         return web.json_response({"error": str(e)}, status=500)
 
 
+async def api_update(request):
+    """무선 코드 업데이트 트리거 — auto_update.sh 즉시 실행.
+
+    내부적으로 roboface-update.service(systemd oneshot) 호출.
+    변경 있으면 자동으로 git pull + 의존성 + 서비스 재시작.
+    재시작되면 web UI 잠깐 끊겼다가 다시 살아남.
+
+    Requires:
+      - roboface-update.service 인스톨됨
+      - 봇 user에 'systemctl start roboface-update.service' sudoers 허용
+        (또는 user-level systemd)
+    """
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["systemctl", "start", "roboface-update.service"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return web.json_response({
+                "error": f"systemctl 실패: {result.stderr.strip() or result.stdout.strip()}",
+            }, status=500)
+        return web.json_response({
+            "ok": True,
+            "msg": "업데이트 트리거 — 변경 있으면 곧 재시작됨 (15~30초)",
+        })
+    except subprocess.TimeoutExpired:
+        return web.json_response({"error": "systemctl timeout"}, status=500)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
 async def api_expressions_list(request):
     """사용 가능한 표정 이름 목록."""
     names = [
@@ -380,6 +412,7 @@ def _create_app(face, ctx, perception):
     app.router.add_post("/api/dance", api_dance)
     app.router.add_post("/api/register-face", api_register_face)
     app.router.add_post("/api/snapshot", api_snapshot_now)
+    app.router.add_post("/api/update", api_update)
 
     app.router.add_static("/static/", path=str(STATIC_DIR))
     return app
