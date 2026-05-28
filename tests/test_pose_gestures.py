@@ -115,12 +115,16 @@ def test_hands_up_resets_on_none():
 # ─── HeadNodDetector ───
 
 def test_head_nod_detected():
-    """코 y좌표가 좁은 범위에서 진동 — 끄덕임 (2-3 사이클/1.2초)."""
+    """코 y좌표가 좁은 범위에서 진동 — 끄덕임 (4 사이클/2.4초).
+
+    임계 강화 후: history_sec=2.2, min_amp=0.10, min_zc=8 (4 cycle).
+    """
     det = HeadNodDetector(fps=10.0)
     hits = 0
-    for i in range(20):
-        # 어깨너비 0.2, nose_y 진동 폭 0.02 (peak-peak), amp_ratio=0.1, 5프레임에 한 사이클
-        ny = 0.3 + math.sin(i * math.pi / 2.5) * 0.01
+    for i in range(30):
+        # 어깨너비 0.2, nose_y 진폭 ±0.012 (peak-peak 0.024) → amp_ratio 0.12
+        # 5프레임에 한 사이클 → 30프레임 = 6 cycle = 12 zc (8~14 범위)
+        ny = 0.3 + math.sin(i * math.pi / 2.5) * 0.012
         kps = _kps(nose_y=ny, shoulder_l_x=0.4, shoulder_r_x=0.6)
         if det.process(kps):
             hits += 1
@@ -137,12 +141,15 @@ def test_head_nod_not_detected_when_static():
 # ─── HeadShakeDetector ───
 
 def test_head_shake_detected():
-    """코 x좌표가 좁은 범위에서 진동 — 도리도리."""
+    """코 x좌표가 좁은 범위에서 진동 — 도리도리 (4 사이클/2.4초).
+
+    임계 강화 후: history_sec=2.2, min_amp=0.10, min_zc=8.
+    """
     det = HeadShakeDetector(fps=10.0)
     hits = 0
-    for i in range(20):
-        # 5프레임에 한 사이클, amp_ratio 0.1
-        nx = 0.5 + math.sin(i * math.pi / 2.5) * 0.01
+    for i in range(30):
+        # amp ±0.012, 5프레임에 한 사이클 → 30프레임 = 12 zc
+        nx = 0.5 + math.sin(i * math.pi / 2.5) * 0.012
         kps = _kps(nose_x=nx)
         if det.process(kps):
             hits += 1

@@ -440,14 +440,24 @@ async def run_vision(
                         pose_stab is None or pose_stab.is_locked
                     )
                     # wave 감지 — pose 모드는 wrist keypoint, detect 모드는 motion
+                    # orientation=front 게이트 추가 (D semantic gate): 사용자가
+                    # 로봇 쪽 향해야 wave 인정. 옆/뒤 보면서 머리 만지기/안경
+                    # 고치기/하품 같은 자연 동작이 wave로 잘못 잡히는 거 차단.
+                    # 자연 인사는 항상 상대 쪽 봄.
                     wave_detected = False
-                    if gesture_gate_ok:
+                    if gesture_gate_ok and orientation == "front":
                         if isinstance(wave_detector, WristWaveDetector):
                             wave_detected = wave_detector.process(last_keypoints)
                         else:
                             wave_detected = wave_detector.process(
                                 frame, effective_bbox,
                             )
+                    elif gesture_gate_ok and isinstance(
+                        wave_detector, WristWaveDetector,
+                    ):
+                        # 옆 보는 동안엔 detector history 리셋 — 정면 복귀 후
+                        # 베이스라인 새로 잡아 옆모습 시 잔류 모션이 fire 안 함.
+                        wave_detector.reset()
                     if wave_detected:
                         emit_event(SensorEvent(
                             type=SensorEventType.GESTURE_WAVE,

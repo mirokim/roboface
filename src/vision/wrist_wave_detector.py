@@ -55,9 +55,10 @@ class WristWaveDetector:
         fps: float = 5.0,
         history_sec: float = 1.5,
         cooldown_sec: float = 2.0,
-        # 어깨너비의 55% 이상 — 실측 진짜 wave가 0.56~0.63 범위. 너무 빡세면
-        # 진짜 인사도 못 잡음. false positive는 KP_CONF + zc + max_below로 잡음.
-        min_amplitude_ratio: float = 0.55,
+        # 어깨너비의 62% 이상 — 실측 진짜 wave 0.56~0.63 하단 잘릴 위험 있어
+        # 0.55→0.62 (D gate가 false +의 대부분 잡으니 보수적 상승).
+        # 진짜 인사도 못 잡으면 0.55로 되돌릴 것.
+        min_amplitude_ratio: float = 0.62,
         # 2 사이클 — 좌→우→좌→우→좌.
         min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
@@ -191,11 +192,11 @@ class WristWaveDetector:
         shoulder_y = float((l_shoulder[1] + r_shoulder[1]) / 2)
         shoulder_mid_x = float((l_shoulder[0] + r_shoulder[0]) / 2)
         self.last_shoulder_y = shoulder_y
-        # 손이 어깨 라인 *위* 또는 어깨너비×0.1(어깨 바로 옆) 이내일 때만 카운트.
-        # 실측: 책상 타이핑/마우스 손이 어깨 아래 가슴-배 부근에서 ±15cm 흔들리며
-        # max_below=0.7로는 통과해 false positive 다수 → 어깨선 위로 강제.
-        # 자연 인사 자세 (손 어깨 높이 이상)만 통과.
-        max_below = shoulder_width * 0.1
+        # 손이 어깨 라인 *위* 어깨너비×0.1만큼은 강제 (max_below 음수).
+        # 0.1 → -0.1: 어깨선보다 어깨너비의 10% 더 위로 올라와야 인정.
+        # 컵 들기/타이핑 시 손이 어깨 살짝 위로 오는 자연 동작 차단.
+        # 진짜 인사는 손을 머리 옆 또는 어깨 한참 위로 듦.
+        max_below = -shoulder_width * 0.1
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때.
