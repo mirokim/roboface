@@ -97,13 +97,40 @@ CREATE INDEX IF NOT EXISTS idx_cmd_status ON command_queue(status, id);
 
 -- agent가 사용자에 대해 학습한 사실 (선호/관심사/맥락).
 -- key는 짧은 주제 (예: "favorite_drink"), value는 자연어 짧은 표현.
+-- category: 'user' (기본) / 'self' (로봇 페르소나) — 컨텍스트 분리.
+-- source: 'agent' (기본) / 'seed' (페르소나 시드) / 'cli' 등 — 출처 추적.
 CREATE TABLE IF NOT EXISTS learned_facts (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     learned_at REAL NOT NULL,
-    last_used_at REAL
+    last_used_at REAL,
+    category TEXT DEFAULT 'user',
+    source TEXT DEFAULT 'agent'
 );
 """
+
+
+# 기존 DB(이 컬럼 없던 시절)에 추가하는 idempotent migration.
+# CREATE TABLE은 IF NOT EXISTS라 기존 테이블 있으면 새 컬럼 안 만듦 → ALTER 필요.
+_MIGRATIONS = [
+    ("learned_facts", "category", "TEXT DEFAULT 'user'"),
+    ("learned_facts", "source",   "TEXT DEFAULT 'agent'"),
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """누락 컬럼 ALTER로 추가. 컬럼 있으면 sqlite가 OperationalError 던져서 skip."""
+    for table, col, decl in _MIGRATIONS:
+        cols = {
+            r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if col in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            log.info(f"migration: {table}.{col} 추가")
+        except sqlite3.OperationalError as e:
+            log.debug(f"migration skip {table}.{col}: {e}")
 
 
 _DB_INITIALIZED = False
@@ -121,6 +148,7 @@ def init_db(path: Path = DB_PATH) -> None:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA_SQL)
+        _apply_migrations(conn)
     if not _DB_INITIALIZED:
         log.info(f"DB 초기화: {path} (WAL)")
         _DB_INITIALIZED = True
@@ -369,7 +397,10 @@ def recent_conversation(minutes: float = 10.0, limit: int = 20) -> list[dict]:
         return out
 
 
-def remember_fact_if_new(key: str, value: str) -> bool:
+def remember_fact_if_new(
+    key: str, value: str,
+    category: str = "user", source: str = "agent",
+) -> bool:
     """key가 없을 때만 INSERT. 이미 있으면 그대로 둠. True면 새로 저장됨.
 
     로봇 자체 페르소나 facts(시드) 등록용 — 사용자가 학습한 fact를 덮어쓰지 않음.
@@ -380,9 +411,10 @@ def remember_fact_if_new(key: str, value: str) -> bool:
         return False
     with db() as conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO learned_facts(key, value, learned_at) "
-            "VALUES (?, ?, ?)",
-            (key, value, time.time()),
+            "INSERT OR IGNORE INTO learned_facts"
+            "(key, value, learned_at, category, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (key, value, time.time(), category, source),
         )
         return cur.rowcount > 0
 
@@ -402,15 +434,22 @@ def seed_robot_facts() -> int:
     """로봇 페르소나 facts 시드 — 이미 있으면 skip. 새로 추가된 개수 반환."""
     added = 0
     for k, v in _ROBOT_PERSONA_FACTS.items():
-        if remember_fact_if_new(k, v):
+        if remember_fact_if_new(k, v, category="self", source="seed"):
             added += 1
     if added:
         log.info(f"로봇 페르소나 facts 시드: {added}개 신규")
     return added
 
 
-def remember_fact(key: str, value: str) -> None:
-    """agent가 학습한 사실 저장/갱신. key가 같으면 value/시각 덮어씀."""
+def remember_fact(
+    key: str, value: str,
+    category: str = "user", source: str = "agent",
+) -> None:
+    """agent가 학습한 사실 저장/갱신. key가 같으면 value/시각 덮어씀.
+
+    category: 'user' (사용자 사실, 기본) / 'self' (로봇 페르소나)
+    source: 'agent' / 'seed' / 'cli'
+    """
     key = (key or "").strip()
     value = (value or "").strip()
     if not key or not value:
@@ -418,30 +457,81 @@ def remember_fact(key: str, value: str) -> None:
     now = time.time()
     with db() as conn:
         conn.execute(
-            "INSERT INTO learned_facts(key, value, learned_at) VALUES (?, ?, ?) "
+            "INSERT INTO learned_facts(key, value, learned_at, category, source) "
+            "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(key) DO UPDATE SET "
-            "  value = excluded.value, learned_at = excluded.learned_at",
-            (key, value, now),
+            "  value = excluded.value, learned_at = excluded.learned_at, "
+            "  category = excluded.category, source = excluded.source",
+            (key, value, now, category, source),
         )
 
 
 def all_facts(limit: int = 30) -> list[dict]:
-    """모든 학습된 사실 (최근 갱신 순)."""
+    """모든 학습된 사실 (최근 갱신 순). category/source 포함."""
     with db() as conn:
         rows = conn.execute(
-            "SELECT key, value, learned_at FROM learned_facts "
-            "ORDER BY learned_at DESC LIMIT ?",
+            "SELECT key, value, learned_at, last_used_at, category, source "
+            "FROM learned_facts ORDER BY learned_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [
-        {"key": r["key"], "value": r["value"], "learned_at": r["learned_at"]}
+        {
+            "key": r["key"], "value": r["value"],
+            "learned_at": r["learned_at"], "last_used_at": r["last_used_at"],
+            "category": r["category"] or "user",
+            "source": r["source"] or "agent",
+        }
         for r in rows
     ]
+
+
+def mark_facts_used(keys: list[str]) -> None:
+    """fact가 agent 컨텍스트에 노출됐음을 기록 — last_used_at 갱신.
+
+    agent의 _build_situation_prefix가 facts를 prompt에 박을 때마다 호출.
+    "한 번도 안 쓰인 fact" 가시화용 — 활용도 추적.
+    """
+    if not keys:
+        return
+    now = time.time()
+    placeholders = ",".join("?" * len(keys))
+    with db() as conn:
+        conn.execute(
+            f"UPDATE learned_facts SET last_used_at = ? "
+            f"WHERE key IN ({placeholders})",
+            (now, *keys),
+        )
 
 
 def forget_fact(key: str) -> None:
     with db() as conn:
         conn.execute("DELETE FROM learned_facts WHERE key = ?", (key.strip(),))
+
+
+# === Schedule-like fact 감지 ===
+# remember_fact 인자가 일정성 정보(예약/회의/마감)면 learned_facts 대신 schedules로 라우팅.
+
+_SCHEDULE_KEYWORDS = (
+    "예약", "회의", "마감", "약속", "일정", "미팅", "방문",
+    "기한", "제출", "참석",
+)
+_TIME_KEYWORDS = (
+    "오늘", "내일", "모레", "다음주", "이번주", "다음달", "매주", "매일",
+    "월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일",
+    "오전", "오후", "아침", "점심", "저녁", "새벽", "밤",
+)
+
+
+def is_schedule_like(key: str, value: str) -> bool:
+    """key/value가 일정성 정보인지 추론."""
+    blob = f"{key} {value}".lower()
+    has_schedule_word = any(kw in blob for kw in _SCHEDULE_KEYWORDS)
+    has_time_word = any(kw in blob for kw in _TIME_KEYWORDS)
+    # "시" 단독은 너무 흔해서 (음식 등) "N시" 패턴만 인정
+    import re
+    has_clock = bool(re.search(r"\d+\s*시", blob))
+    # 둘 중 하나라도 schedule 키워드 있고, 시간 단서 있으면 schedule
+    return has_schedule_word and (has_time_word or has_clock)
 
 
 def search_conversation(

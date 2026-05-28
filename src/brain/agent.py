@@ -390,8 +390,12 @@ def _build_situation_prefix(ctx: StateContext) -> str:
     try:
         facts = memory.all_facts(limit=30)
         if facts:
-            self_facts = [f for f in facts if f["key"].startswith("self:")]
-            user_facts = [f for f in facts if not f["key"].startswith("self:")]
+            # category 우선, 없는 경우(레거시) key prefix로 fallback
+            self_facts = [
+                f for f in facts
+                if f.get("category") == "self" or f["key"].startswith("self:")
+            ]
+            user_facts = [f for f in facts if f not in self_facts]
             if self_facts:
                 lines = [
                     f"  - {f['key'].removeprefix('self:')}: {f['value']}"
@@ -401,6 +405,11 @@ def _build_situation_prefix(ctx: StateContext) -> str:
             if user_facts:
                 lines = [f"  - {f['key']}: {f['value']}" for f in user_facts]
                 parts.append("사용자에 대해 학습한 사실:\n" + "\n".join(lines))
+            # 노출된 fact key들 — last_used_at 갱신 (활용도 추적)
+            try:
+                memory.mark_facts_used([f["key"] for f in facts])
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -899,8 +908,19 @@ class RobotAgent:
         value = (inp.get("value") or "").strip()
         if not key or not value:
             return
+        # 일정성 정보면 schedules 테이블로 라우팅 — learned_facts 오염 방지.
+        # schedule_extractor가 못 잡은 케이스를 agent가 fact로 박는 패턴 차단.
         try:
-            memory.remember_fact(key, value)
+            if memory.is_schedule_like(key, value):
+                memory.add_schedule(
+                    event_type="reminder",
+                    event_datetime=value,  # ISO 파싱 어려우면 원문 그대로
+                    description=f"{key}: {value}",
+                    confidence=0.5,
+                )
+                log.info(f"📅 [agent] schedule (fact 대신): {key} = {value}")
+                return
+            memory.remember_fact(key, value, category="user", source="agent")
             log.info(f"🧠 [agent] remembered: {key} = {value}")
         except Exception as e:
             log.warning(f"remember_fact 실패: {e}")
