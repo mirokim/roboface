@@ -165,6 +165,8 @@ def test_microphone_broker_fans_out():
     mic._subscribers = [mic._queue]
     import threading
     mic._lock = threading.Lock()
+    # _callback이 신규로 보는 변환 플래그 — 변환 없이 그대로 fan-out
+    mic._needs_convert = False
 
     # 진짜 Microphone의 _callback를 unbound로 호출
     other = Microphone.add_subscriber.__get__(mic)(maxsize=20)

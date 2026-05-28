@@ -54,13 +54,19 @@ class Microphone:
     def __init__(self, device: int | str | None = None,
                  sample_rate: int = SAMPLE_RATE) -> None:
         self.device = device
-        self.sample_rate = sample_rate
+        self.sample_rate = sample_rate   # downstream(target) rate
         self._sd, _ = _load_backends()
         self._stream = None
         # 기본 큐 — frame() 호환성 유지
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=200)
         self._subscribers: list[queue.Queue[bytes]] = [self._queue]
         self._lock = threading.Lock()
+        # 디바이스 native format 협상 — 일부 USB 마이크(예: COMS CM421)는
+        # 16kHz mono 지원 X. native rate/channels로 캡처 후 numpy resample.
+        self._native_rate = sample_rate
+        self._native_channels = 1
+        self._needs_convert = False
+        self._negotiate_format()
 
     def add_subscriber(self, maxsize: int = 200) -> queue.Queue[bytes]:
         """별도 소비자가 자체 큐를 받음. (voice_assistant + audio_monitor 동시)."""
@@ -74,11 +80,71 @@ class Microphone:
             if q in self._subscribers:
                 self._subscribers.remove(q)
 
+    def _negotiate_format(self) -> None:
+        """디바이스가 target rate/channels로 직접 못 열리면 native로 fallback.
+
+        예: COMS CM421은 44.1kHz stereo만 — 16k mono 요청 시 PortAudio가
+        PaInvalidSampleRate 던짐. native(44.1k 2ch)로 캡처 후 callback에서
+        numpy로 mono 변환 + 다운샘플.
+        """
+        try:
+            info = self._sd.query_devices(self.device, "input")
+        except Exception as e:
+            log.debug(f"디바이스 query 실패 — target 그대로: {e}")
+            return
+        max_ch = int(info.get("max_input_channels", 1))
+        default_rate = int(info.get("default_samplerate", self.sample_rate))
+        # 일단 target 그대로 가능한지 빠르게 try
+        try:
+            self._sd.check_input_settings(
+                device=self.device, channels=1, samplerate=self.sample_rate,
+                dtype="int16",
+            )
+            return   # native가 target 지원 — 그대로 가자
+        except Exception:
+            pass
+        # 변환 필요 — native rate/channels로 캡처
+        self._native_rate = default_rate
+        self._native_channels = min(max_ch, 2) if max_ch > 0 else 1
+        self._needs_convert = True
+        log.info(
+            f"마이크 native format으로 fallback: "
+            f"{self._native_rate}Hz {self._native_channels}ch "
+            f"→ {self.sample_rate}Hz 1ch (resample)"
+        )
+
+    def _convert_native_to_target(self, indata) -> bytes:
+        """native rate/channels → target rate mono. numpy.interp 기반 단순 resample.
+
+        음성 대역(80-8kHz)엔 충분. 고품질 anti-aliasing 필요하면 scipy 추가.
+        """
+        import numpy as np
+        arr = np.frombuffer(
+            bytes(indata), dtype=np.int16,
+        ).reshape(-1, self._native_channels)
+        # stereo → mono (평균)
+        if self._native_channels > 1:
+            mono = arr.mean(axis=1).astype(np.float32)
+        else:
+            mono = arr[:, 0].astype(np.float32)
+        # rate convert (linear interp)
+        if self._native_rate != self.sample_rate:
+            n_out = int(len(mono) * self.sample_rate / self._native_rate)
+            if n_out <= 1:
+                return b""
+            x_in = np.linspace(0, 1, len(mono), endpoint=False)
+            x_out = np.linspace(0, 1, n_out, endpoint=False)
+            mono = np.interp(x_out, x_in, mono)
+        return mono.astype(np.int16).tobytes()
+
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ARG002
         if status:
             log.debug(f"sd status: {status}")
-        # indata is int16 numpy array shape (frames, 1)
-        data = bytes(indata)
+        # indata: int16 numpy array shape (frames, native_channels)
+        if self._needs_convert:
+            data = self._convert_native_to_target(indata)
+        else:
+            data = bytes(indata)
         with self._lock:
             subs = list(self._subscribers)
         for q in subs:
@@ -96,12 +162,19 @@ class Microphone:
         return self
 
     def __enter__(self) -> "Microphone":
+        # native rate가 다르면 그 rate로 캡처 (callback에서 변환).
+        # blocksize도 native rate 기준 30ms 프레임으로.
+        open_rate = self._native_rate if self._needs_convert else self.sample_rate
+        open_channels = (
+            self._native_channels if self._needs_convert else 1
+        )
+        open_blocksize = (open_rate * FRAME_MS) // 1000
         try:
             self._stream = self._sd.RawInputStream(
-                samplerate=self.sample_rate,
-                blocksize=FRAME_SAMPLES,
+                samplerate=open_rate,
+                blocksize=open_blocksize,
                 device=self.device,
-                channels=1,
+                channels=open_channels,
                 dtype="int16",
                 callback=self._callback,
             )
@@ -111,7 +184,12 @@ class Microphone:
             raise MicCaptureError(
                 f"오디오 디바이스 열기 실패 (device={self.device}): {e}"
             ) from e
-        log.info(f"마이크 시작 (device={self.device}, {self.sample_rate}Hz)")
+        log.info(
+            f"마이크 시작 (device={self.device}, "
+            f"{open_rate}Hz {open_channels}ch"
+            + (f" → {self.sample_rate}Hz 1ch" if self._needs_convert else "")
+            + ")"
+        )
         return self
 
     def __exit__(self, *exc) -> None:
