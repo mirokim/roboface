@@ -25,6 +25,12 @@ def _get_tts():
     if _tts_tried:
         return _tts_singleton
     _tts_tried = True
+    # 명시적 비활성 (스피커 없는 셋업) — OpenAI 인증 시도조차 안 함
+    from src.config import TTS_DISABLED
+    if TTS_DISABLED:
+        log.info("TTS_DISABLED=1 — OpenAI TTS skip, fake animation 사용")
+        _tts_singleton = None
+        return None
     try:
         from src.audio.tts import OpenAITTS
         _tts_singleton = OpenAITTS()

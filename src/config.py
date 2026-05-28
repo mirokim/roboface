@@ -80,6 +80,9 @@ MMWAVE_BAUDRATE = 115200
 
 # === 음성 (STT/TTS/Wake word) ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# TTS 명시적 비활성 — 스피커 없는 셋업. OPENAI_API_KEY가 있어도 TTS는 X,
+# fake animation(입모양만)로 폴백. STT는 영향 받지 않음.
+TTS_DISABLED = os.getenv("TTS_DISABLED", "").lower() in ("1", "true", "yes")
 PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
 PORCUPINE_KEYWORD = os.getenv("PORCUPINE_KEYWORD", "jarvis")
 PORCUPINE_KEYWORD_PATH = os.getenv("PORCUPINE_KEYWORD_PATH", "") or None
