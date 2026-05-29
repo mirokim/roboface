@@ -19,7 +19,7 @@ from src.brain import conversation_templates, memory, stats as robot_stats
 from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
-from src.config import AUDIO_INPUT_DEVICE, is_robot
+from src.config import AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, is_robot
 from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
@@ -98,10 +98,14 @@ async def run_robot() -> None:
         shared_mic = None
 
     ambient: AmbientListener | None = None
-    if shared_mic is not None:
+    if shared_mic is not None and AMBIENT_LISTEN:
+        # AMBIENT_LISTEN=1일 때만. 기본은 비활성 — mock STT가 가짜 발화로
+        # conversation_log 오염시키고 agent가 잘못 반응하는 문제 차단.
         ambient = AmbientListener()
         ambient.add_handler(schedule_extractor.handle_transcript)
         ambient.add_handler(journal_writer.handle_transcript)
+    elif shared_mic is not None:
+        log.info("ambient_listener 비활성 (AMBIENT_LISTEN=1 미설정)")
 
     bg_tasks = [
         asyncio.create_task(sensors.run(), name="sensors"),

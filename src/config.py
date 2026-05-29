@@ -83,6 +83,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # TTS 명시적 비활성 — 스피커 없는 셋업. OPENAI_API_KEY가 있어도 TTS는 X,
 # fake animation(입모양만)로 폴백. STT는 영향 받지 않음.
 TTS_DISABLED = os.getenv("TTS_DISABLED", "").lower() in ("1", "true", "yes")
+# ambient 주변 청취 활성. 기본 False — mock STT가 90초마다 가짜 발화
+# 흘려보내 conversation_log를 오염시키고 agent가 "사용자가 말했다"고
+# 잘못 반응함. 진짜 Whisper streaming 붙은 후 명시적으로 활성.
+AMBIENT_LISTEN = os.getenv("AMBIENT_LISTEN", "").lower() in ("1", "true", "yes")
 PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
 PORCUPINE_KEYWORD = os.getenv("PORCUPINE_KEYWORD", "jarvis")
 PORCUPINE_KEYWORD_PATH = os.getenv("PORCUPINE_KEYWORD_PATH", "") or None
