@@ -23,6 +23,40 @@ from src.utils.logger import get_logger
 log = get_logger("ambient")
 
 
+def _normalize_wav_peak(
+    wav_bytes: bytes, target_peak: int = 28000, max_gain: float = 50.0,
+    noise_floor: int = 80,
+) -> bytes:
+    """16-bit mono WAV peak를 target_peak로 정규화 (소프트웨어 게인).
+
+    - peak가 noise_floor보다 작으면 무음 — 게인 안 줌 (잡음 증폭 방지)
+    - max_gain 캡 — 노이즈 floor 너무 부풀리지 않게 상한
+    """
+    import io
+    import wave
+    import numpy as np
+
+    in_buf = io.BytesIO(wav_bytes)
+    with wave.open(in_buf, "rb") as wf:
+        params = wf.getparams()
+        pcm = wf.readframes(wf.getnframes())
+    if not pcm:
+        return wav_bytes
+    arr = np.frombuffer(pcm, dtype=np.int16)
+    peak = int(np.max(np.abs(arr)))
+    if peak < noise_floor:
+        return wav_bytes
+    gain = min(max_gain, target_peak / peak)
+    amplified = np.clip(
+        arr.astype(np.float32) * gain, -32768, 32767,
+    ).astype(np.int16)
+    out_buf = io.BytesIO()
+    with wave.open(out_buf, "wb") as wf:
+        wf.setparams(params)
+        wf.writeframes(amplified.tobytes())
+    return out_buf.getvalue()
+
+
 # Mock transcript pool — 부품 도착 전 시뮬레이션용
 _MOCK_TRANSCRIPTS = [
     "내일 오후 3시에 김 부장님과 회의가 있어",
@@ -103,6 +137,9 @@ class WhisperVADStreamer:
                 # 발화 없음 — 잠깐 양보 후 다음 라운드
                 await asyncio.sleep(0.05)
                 continue
+            # 마이크 게인이 낮으면 (저감도 USB 마이크) Whisper가 텍스트 못 뽑음.
+            # WAV peak를 ~30000(clip 직전)으로 정규화.
+            wav = _normalize_wav_peak(wav)
             try:
                 text = await self.stt.transcribe(wav)
             except Exception as e:
