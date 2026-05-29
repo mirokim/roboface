@@ -20,7 +20,7 @@ from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import (
-    AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, OPENAI_API_KEY, WAKE_DISABLED, is_robot,
+    AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, WAKE_DISABLED, is_robot,
 )
 from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
@@ -111,24 +111,19 @@ async def run_robot() -> None:
     if shared_mic is not None and AMBIENT_LISTEN:
         # AMBIENT_LISTEN=1 + OPENAI_API_KEY 있으면 진짜 STT (Whisper) 모드.
         # 키 없으면 활성화 안 됨 — mock STT는 의도적 폴백 안 함.
-        if not OPENAI_API_KEY:
-            log.warning(
-                "AMBIENT_LISTEN=1 이지만 OPENAI_API_KEY 없음 — ambient 비활성"
+        try:
+            from src.audio.stt import create_stt
+            from src.tasks.ambient_listener import WhisperVADStreamer
+            stt = create_stt()  # STT_BACKEND env로 선택 — 기본 auto(local 우선)
+            streamer = WhisperVADStreamer(
+                shared_mic, stt, perception=perception,
             )
-        else:
-            try:
-                from src.audio.stt import OpenAIWhisperSTT
-                from src.tasks.ambient_listener import WhisperVADStreamer
-                stt = OpenAIWhisperSTT()
-                streamer = WhisperVADStreamer(
-                    shared_mic, stt, perception=perception,
-                )
-                ambient = AmbientListener(stt=streamer)
-                ambient.add_handler(schedule_extractor.handle_transcript)
-                ambient.add_handler(journal_writer.handle_transcript)
-                log.info("ambient_listener 활성 — Whisper VAD always-on STT")
-            except Exception as e:
-                log.warning(f"ambient(Whisper) init 실패: {e}")
+            ambient = AmbientListener(stt=streamer)
+            ambient.add_handler(schedule_extractor.handle_transcript)
+            ambient.add_handler(journal_writer.handle_transcript)
+            log.info("ambient_listener 활성 — VAD always-on STT")
+        except Exception as e:
+            log.warning(f"ambient STT init 실패: {e}")
     elif shared_mic is not None:
         log.info("ambient_listener 비활성 (AMBIENT_LISTEN=1 미설정)")
 

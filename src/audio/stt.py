@@ -1,6 +1,6 @@
-"""STT — OpenAI Whisper API.
+"""STT — OpenAI Whisper API + 로컬 faster-whisper.
 
-WAV 바이트 → 한국어 텍스트.
+WAV 바이트 → 한국어 텍스트. 두 백엔드 동일 인터페이스 (transcribe).
 """
 
 from __future__ import annotations
@@ -16,6 +16,67 @@ log = get_logger("stt")
 
 class STTError(RuntimeError):
     pass
+
+
+class LocalFasterWhisperSTT:
+    """faster-whisper 로컬 — API 비용 0, 100% on-device.
+
+    Pi5에서 'base' 모델(74MB) int8 양자화 시 거의 실시간. 첫 사용 시 모델
+    자동 다운로드 (~150MB CTranslate2 양자화 weights).
+    """
+
+    def __init__(
+        self,
+        model_size: str = "base",
+        language: str = "ko",
+        device: str = "cpu",
+        compute_type: str = "int8",
+        beam_size: int = 1,
+    ) -> None:
+        try:
+            from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise STTError(
+                f"faster-whisper 미설치: {e}. pip install faster-whisper"
+            ) from e
+        try:
+            self._model = WhisperModel(
+                model_size, device=device, compute_type=compute_type,
+            )
+        except Exception as e:
+            raise STTError(f"faster-whisper 모델 로드 실패: {e}") from e
+        self.language = language
+        self.beam_size = beam_size
+        self.model_size = model_size
+        log.info(
+            f"LocalFasterWhisperSTT 준비: model={model_size} "
+            f"device={device} compute={compute_type} lang={language}"
+        )
+
+    async def transcribe(self, wav_bytes: bytes) -> str:
+        if not wav_bytes:
+            return ""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._transcribe_sync, wav_bytes)
+
+    def _transcribe_sync(self, wav_bytes: bytes) -> str:
+        buf = io.BytesIO(wav_bytes)
+        try:
+            segments, _info = self._model.transcribe(
+                buf,
+                language=self.language,
+                beam_size=self.beam_size,
+                # VAD 후처리 비활성 — 이미 mic쪽 VAD가 잘라서 보냄
+                vad_filter=False,
+                # 짧은 발화에 hallucination 흔함 — 빈 invitation으로 강제
+                initial_prompt=None,
+            )
+            text = " ".join(s.text for s in segments).strip()
+            log.info(f'STT(local): "{text}"')
+            return text
+        except Exception as e:
+            log.warning(f"local STT 실패: {e}")
+            return ""
 
 
 class OpenAIWhisperSTT:
@@ -62,3 +123,28 @@ class OpenAIWhisperSTT:
         except Exception as e:
             log.warning(f"STT 실패: {e}")
             return ""
+
+
+def create_stt(backend: str | None = None):
+    """STT 백엔드 자동 선택.
+
+    backend:
+      - "local"  → LocalFasterWhisperSTT ('base' 기본)
+      - "openai" → OpenAIWhisperSTT
+      - "auto"   → local 시도 후 실패 시 openai (기본)
+      - None     → env STT_BACKEND (없으면 "auto")
+    """
+    if backend is None:
+        backend = os.getenv("STT_BACKEND", "auto").lower()
+    model_size = os.getenv("STT_LOCAL_MODEL", "base")
+
+    if backend == "local":
+        return LocalFasterWhisperSTT(model_size=model_size)
+    if backend == "openai":
+        return OpenAIWhisperSTT()
+    # auto: local 우선, 실패 시 openai fallback
+    try:
+        return LocalFasterWhisperSTT(model_size=model_size)
+    except STTError as e:
+        log.warning(f"local STT 실패 — OpenAI fallback: {e}")
+        return OpenAIWhisperSTT()

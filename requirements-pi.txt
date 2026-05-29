@@ -32,7 +32,8 @@ webrtcvad>=2.0.10                      # VAD (발화 구간 감지)
 pvporcupine>=3.0.0                     # 웨이크 워드 (Picovoice — 키 필요)
 openwakeword>=0.6.0                    # 웨이크 워드 (오픈소스, 키 없음, fallback)
 onnxruntime>=1.16.0                    # openwakeword inference (Pi5 arm64 지원)
-openai>=1.30.0                         # Whisper STT + TTS
+openai>=1.30.0                         # Whisper STT + TTS (API)
+faster-whisper>=1.0.0                  # 로컬 Whisper STT (Pi5 base 모델 권장, ~150MB)
 pydub>=0.25.1                          # MP3 디코딩 (TTS 출력 → PCM)
 # ffmpeg 시스템 패키지 필요: sudo apt install -y ffmpeg
 
