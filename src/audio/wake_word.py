@@ -141,10 +141,12 @@ class OpenWakeWord:
         # 파일 경로 리스트 (이름이 아님). 미지정 시 모든 사전학습 모델 로드.
         model_path = self._find_bundled_model(model_prefix)
         try:
-            kwargs = {"inference_framework": "onnx"}
+            # 0.4.0은 inference_framework kwarg X — onnx 자동 사용 (onnxruntime
+            # 설치돼 있으면). model_paths 미지정 시 모든 사전학습 모델 로드.
             if model_path is not None:
-                kwargs["wakeword_model_paths"] = [model_path]
-            self._model = Model(**kwargs)
+                self._model = Model(wakeword_model_paths=[model_path])
+            else:
+                self._model = Model()
         except Exception as e:
             raise WakeWordError(
                 f"openWakeWord 초기화 실패 ({model_prefix}): {e}"
