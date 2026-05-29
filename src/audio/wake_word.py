@@ -107,14 +107,18 @@ class OpenWakeWord:
     16kHz mono int16 입력. 80ms 청크 단위 추론 (1280 샘플).
     """
 
-    # 모델명 매핑 — Porcupine과 사용자 친화적 이름 호환
+    # 모델명 → openwakeword 0.4.0 번들 onnx 파일 prefix 매핑
     _MODEL_ALIASES = {
         "jarvis": "hey_jarvis",
         "hey jarvis": "hey_jarvis",
+        "hey_jarvis": "hey_jarvis",
         "alexa": "alexa",
         "mycroft": "hey_mycroft",
         "hey mycroft": "hey_mycroft",
-        "rhasspy": "hey_rhasspy",
+        "hey_mycroft": "hey_mycroft",
+        "marvin": "hey_marvin",
+        "hey marvin": "hey_marvin",
+        "hey_marvin": "hey_marvin",
     }
 
     CHUNK_SAMPLES = 1280   # 80ms @ 16kHz — openwakeword 기본
@@ -132,30 +136,42 @@ class OpenWakeWord:
                 f"openwakeword 미설치: {e}. pip install openwakeword"
             ) from e
 
-        model_name = self._MODEL_ALIASES.get(keyword.lower(), keyword)
+        model_prefix = self._MODEL_ALIASES.get(keyword.lower(), keyword)
+        # 번들된 onnx 파일 자동 찾기 — 0.4.0은 wakeword_model_paths 인자가
+        # 파일 경로 리스트 (이름이 아님). 미지정 시 모든 사전학습 모델 로드.
+        model_path = self._find_bundled_model(model_prefix)
         try:
-            # 첫 사용 시 자동 다운로드 (~ small ONNX 파일).
-            # inference_framework='onnx'는 onnxruntime 필요 (대부분 환경 기본).
-            self._model = Model(
-                wakeword_models=[model_name],
-                inference_framework="onnx",
-            )
+            kwargs = {"inference_framework": "onnx"}
+            if model_path is not None:
+                kwargs["wakeword_model_paths"] = [model_path]
+            self._model = Model(**kwargs)
         except Exception as e:
-            # 모델 다운로드 실패 또는 onnxruntime 없음
             raise WakeWordError(
-                f"openWakeWord 초기화 실패 ({model_name}): {e}. "
-                "openwakeword.utils.download_models() 또는 pip install onnxruntime"
+                f"openWakeWord 초기화 실패 ({model_prefix}): {e}"
             ) from e
 
-        self.keyword = model_name
+        # 실제 로드된 모델 키 (predict() 결과 dict의 키와 일치)
+        self._target_keys = list(self._model.models.keys())
+        self.keyword = model_prefix
         self.threshold = threshold
         self.frame_length = self.CHUNK_SAMPLES
         self.sample_rate = self.SAMPLE_RATE
         self._buffer = bytearray()
         log.info(
-            f"openWakeWord 준비: model={model_name}, threshold={threshold}, "
-            f"frame_length={self.frame_length}, sr={self.sample_rate}"
+            f"openWakeWord 준비: model={model_prefix} keys={self._target_keys}, "
+            f"threshold={threshold}, sr={self.sample_rate}"
         )
+
+    @staticmethod
+    def _find_bundled_model(prefix: str) -> str | None:
+        """openwakeword/resources/models/ 안의 {prefix}_v*.onnx 찾기."""
+        import openwakeword
+        from pathlib import Path
+        base = Path(openwakeword.__file__).parent / "resources" / "models"
+        if not base.is_dir():
+            return None
+        matches = sorted(base.glob(f"{prefix}_v*.onnx"))
+        return str(matches[0]) if matches else None
 
     def process_pcm(self, pcm_bytes: bytes) -> bool:
         """Porcupine 인터페이스와 동일. 30ms 프레임 누적 → 1280 샘플마다 추론."""
@@ -169,11 +185,21 @@ class OpenWakeWord:
             del self._buffer[:chunk_bytes]
             audio = np.frombuffer(chunk, dtype=np.int16)
             scores = self._model.predict(audio)
-            # scores: {model_name: float} — threshold 넘으면 detected
-            if any(s >= self.threshold for s in scores.values()):
+            # scores: {model_key: float}. _target_keys만 보면 (다른 모델 무시)
+            if self._target_keys:
+                hit = any(
+                    scores.get(k, 0.0) >= self.threshold
+                    for k in self._target_keys
+                )
+            else:
+                hit = any(s >= self.threshold for s in scores.values())
+            if hit:
                 detected = True
                 # 한 번 감지되면 잔여 버퍼/내부 state 리셋 (연속 fire 방지)
-                self._model.reset()
+                try:
+                    self._model.reset()
+                except Exception:
+                    pass
                 self._buffer.clear()
                 break
         return detected
