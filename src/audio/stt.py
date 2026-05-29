@@ -59,6 +59,24 @@ class LocalFasterWhisperSTT:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._transcribe_sync, wav_bytes)
 
+    # 한국어 Whisper가 무음/노이즈에 자주 끼워넣는 hallucination 패턴.
+    # 유튜브 학습 데이터 잔재 — 정확한/부분 일치 시 빈 텍스트로 폐기.
+    _HALLUCINATION_PATTERNS = (
+        "구독", "좋아요", "시청해", "시청 해", "감사합니다",
+        "MBC 뉴스", "KBS 뉴스", "한국어 자막",
+        "이 영상", "다음 영상", "다음 시간",
+    )
+
+    def _is_hallucination(self, text: str) -> bool:
+        t = text.strip()
+        if not t:
+            return True
+        # 짧은 텍스트 + 알려진 패턴 포함 → hallucination
+        for pat in self._HALLUCINATION_PATTERNS:
+            if pat in t:
+                return True
+        return False
+
     def _transcribe_sync(self, wav_bytes: bytes) -> str:
         buf = io.BytesIO(wav_bytes)
         try:
@@ -66,12 +84,20 @@ class LocalFasterWhisperSTT:
                 buf,
                 language=self.language,
                 beam_size=self.beam_size,
-                # VAD 후처리 비활성 — 이미 mic쪽 VAD가 잘라서 보냄
                 vad_filter=False,
-                # 짧은 발화에 hallucination 흔함 — 빈 invitation으로 강제
+                # hallucination 억제:
+                # - no_speech_threshold 높임: noise→텍스트 변환 빡세게
+                # - condition_on_previous_text False: 이전 텍스트 영향 차단
+                # - compression_ratio_threshold 낮춤: 반복/이상 출력 차단
+                no_speech_threshold=0.7,
+                condition_on_previous_text=False,
+                compression_ratio_threshold=2.0,
                 initial_prompt=None,
             )
             text = " ".join(s.text for s in segments).strip()
+            if self._is_hallucination(text):
+                log.info(f'STT(local): hallucination drop — "{text}"')
+                return ""
             log.info(f'STT(local): "{text}"')
             return text
         except Exception as e:
