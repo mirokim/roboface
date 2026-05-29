@@ -99,7 +99,117 @@ class PorcupineWakeWord:
             pass
 
 
-async def wait_for_wake(mic: Any, wake: PorcupineWakeWord, stop_event=None) -> bool:
+class OpenWakeWord:
+    """openWakeWord 엔진 wrapper — Porcupine과 동일 인터페이스 (process_pcm/close).
+
+    MIT 라이센스, 키 불필요, 로컬 실행. Pre-trained 모델:
+    "alexa", "hey_jarvis", "hey_mycroft", "hey_rhasspy".
+    16kHz mono int16 입력. 80ms 청크 단위 추론 (1280 샘플).
+    """
+
+    # 모델명 매핑 — Porcupine과 사용자 친화적 이름 호환
+    _MODEL_ALIASES = {
+        "jarvis": "hey_jarvis",
+        "hey jarvis": "hey_jarvis",
+        "alexa": "alexa",
+        "mycroft": "hey_mycroft",
+        "hey mycroft": "hey_mycroft",
+        "rhasspy": "hey_rhasspy",
+    }
+
+    CHUNK_SAMPLES = 1280   # 80ms @ 16kHz — openwakeword 기본
+    SAMPLE_RATE = 16000
+
+    def __init__(
+        self,
+        keyword: str = "hey_jarvis",
+        threshold: float = 0.5,
+    ) -> None:
+        try:
+            from openwakeword.model import Model  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise WakeWordError(
+                f"openwakeword 미설치: {e}. pip install openwakeword"
+            ) from e
+
+        model_name = self._MODEL_ALIASES.get(keyword.lower(), keyword)
+        try:
+            # 첫 사용 시 자동 다운로드 (~ small ONNX 파일).
+            # inference_framework='onnx'는 onnxruntime 필요 (대부분 환경 기본).
+            self._model = Model(
+                wakeword_models=[model_name],
+                inference_framework="onnx",
+            )
+        except Exception as e:
+            # 모델 다운로드 실패 또는 onnxruntime 없음
+            raise WakeWordError(
+                f"openWakeWord 초기화 실패 ({model_name}): {e}. "
+                "openwakeword.utils.download_models() 또는 pip install onnxruntime"
+            ) from e
+
+        self.keyword = model_name
+        self.threshold = threshold
+        self.frame_length = self.CHUNK_SAMPLES
+        self.sample_rate = self.SAMPLE_RATE
+        self._buffer = bytearray()
+        log.info(
+            f"openWakeWord 준비: model={model_name}, threshold={threshold}, "
+            f"frame_length={self.frame_length}, sr={self.sample_rate}"
+        )
+
+    def process_pcm(self, pcm_bytes: bytes) -> bool:
+        """Porcupine 인터페이스와 동일. 30ms 프레임 누적 → 1280 샘플마다 추론."""
+        import numpy as np
+
+        self._buffer.extend(pcm_bytes)
+        chunk_bytes = self.frame_length * 2  # int16
+        detected = False
+        while len(self._buffer) >= chunk_bytes:
+            chunk = bytes(self._buffer[:chunk_bytes])
+            del self._buffer[:chunk_bytes]
+            audio = np.frombuffer(chunk, dtype=np.int16)
+            scores = self._model.predict(audio)
+            # scores: {model_name: float} — threshold 넘으면 detected
+            if any(s >= self.threshold for s in scores.values()):
+                detected = True
+                # 한 번 감지되면 잔여 버퍼/내부 state 리셋 (연속 fire 방지)
+                self._model.reset()
+                self._buffer.clear()
+                break
+        return detected
+
+    def close(self) -> None:
+        # openWakeWord는 별도 cleanup 불필요
+        pass
+
+
+def create_wake_word(
+    keyword: str = "jarvis",
+    keyword_path: str | None = None,
+    sensitivity: float = 0.6,
+) -> "PorcupineWakeWord | OpenWakeWord":
+    """Wake word 엔진 자동 선택.
+
+    1. PORCUPINE_ACCESS_KEY 있으면 Porcupine (한국어 .ppn 지원 + 정확)
+    2. 없으면 openWakeWord (오픈소스, 영어 사전학습)
+    3. 둘 다 실패하면 WakeWordError
+    """
+    if os.getenv("PORCUPINE_ACCESS_KEY", ""):
+        try:
+            return PorcupineWakeWord(
+                keyword=keyword, keyword_path=keyword_path,
+                sensitivity=sensitivity,
+            )
+        except WakeWordError as e:
+            log.warning(f"Porcupine 실패 — openWakeWord로 fallback: {e}")
+    return OpenWakeWord(keyword=keyword, threshold=sensitivity)
+
+
+async def wait_for_wake(
+    mic: Any,
+    wake: "PorcupineWakeWord | OpenWakeWord",
+    stop_event=None,
+) -> bool:
     """마이크에서 프레임을 받아 wake word 감지될 때까지 대기.
 
     stop_event(asyncio.Event)가 set되면 중단 후 False 반환.

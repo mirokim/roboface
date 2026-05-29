@@ -18,7 +18,9 @@ import asyncio
 from src.audio.mic import Microphone, MicCaptureError, VADRecorder
 from src.audio.stt import OpenAIWhisperSTT, STTError
 from src.audio.tts import OpenAITTS, TTSError, speak as tts_speak
-from src.audio.wake_word import PorcupineWakeWord, WakeWordError, wait_for_wake
+from src.audio.wake_word import (
+    PorcupineWakeWord, WakeWordError, create_wake_word, wait_for_wake,
+)
 from src.brain import conversation
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import (
@@ -119,9 +121,9 @@ class VoiceAssistant:
                 log.warning(f"마이크 초기화 실패 — voice_assistant 비활성화: {e}")
                 return None, None, None, None
 
-        # Wake word
+        # Wake word — Porcupine 우선, 키 없으면 openWakeWord(오픈소스) fallback
         try:
-            wake = PorcupineWakeWord(
+            wake = create_wake_word(
                 keyword=self.wake_keyword,
                 keyword_path=self.wake_keyword_path,
             )
