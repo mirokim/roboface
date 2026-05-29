@@ -1,12 +1,13 @@
 """주변 청취 — STT로 사용자 발화 텍스트화 + 후속 처리.
 
-부품 도착 전: mock transcripts (가끔 사전 정의 문장 emit)
-부품 도착 후: audio/stt.py가 Whisper로 실제 텍스트 제공.
+스트리머 종류:
+- MockSTT — 사전정의 문장 가끔 emit (개발/시뮬용)
+- WhisperVADStreamer — 마이크 + VAD로 발화 잘라 OpenAI Whisper 호출
 
 후속 처리:
+- conversation_log "ambient" 기록 → agent 컨텍스트에 자동 노출
 - 일정/약속 언급 → schedule_extractor로 전달
 - 의미 있는 발화 → journal_writer로 전달
-- 직접 명령("조용히", "오늘 일정") → 즉시 응답
 """
 
 from __future__ import annotations
@@ -52,15 +53,85 @@ class MockSTT:
             yield text
 
 
+class WhisperVADStreamer:
+    """VAD always-on + OpenAI Whisper — wake word 없이 발화 → 텍스트.
+
+    cost 보호:
+    - perception.user_present False면 record skip (사람 없는데 STT X)
+    - 너무 짧은 텍스트(2자 이하) 또는 너무 긴 utterance 제외
+    - VADRecorder가 start_timeout 안에 발화 없으면 None 반환 — 그냥 다음 라운드
+    """
+
+    def __init__(
+        self,
+        mic: Any,
+        stt: Any,
+        perception: Any | None = None,
+        max_sec: float = 15.0,
+        silence_ms: int = 700,
+        aggressiveness: int = 2,
+    ) -> None:
+        from src.audio.mic import VADRecorder
+        self.mic = mic
+        self.stt = stt
+        self.perception = perception
+        self.recorder = VADRecorder(
+            mic, aggressiveness=aggressiveness,
+            silence_ms=silence_ms,
+            start_timeout_sec=2.0,  # 짧게 — 사람 없으면 빨리 빠져나와 가드 재체크
+        )
+        self.max_sec = max_sec
+
+    def _user_present(self) -> bool:
+        if self.perception is None:
+            return True
+        return bool(getattr(self.perception, "user_present", True))
+
+    async def stream(self) -> AsyncIterator[str]:
+        while True:
+            # 사람 없으면 잠깐 쉬고 재체크 (STT 호출 자체 차단)
+            if not self._user_present():
+                await asyncio.sleep(2.0)
+                continue
+            try:
+                wav = await self.recorder.record_utterance(max_sec=self.max_sec)
+            except Exception as e:
+                log.warning(f"VAD record 실패: {e}")
+                await asyncio.sleep(0.5)
+                continue
+            if not wav:
+                # 발화 없음 — 잠깐 양보 후 다음 라운드
+                await asyncio.sleep(0.05)
+                continue
+            try:
+                text = await self.stt.transcribe(wav)
+            except Exception as e:
+                log.warning(f"STT 호출 실패: {e}")
+                continue
+            text = (text or "").strip()
+            # 너무 짧으면 무시 (잡음/단발 음절). Whisper는 빈 발화도 단어 추측함.
+            if len(text) <= 2:
+                continue
+            yield text
+
+
 # 콜백 시그니처: 발화 텍스트 받아서 처리
 TranscriptHandler = Callable[[str], Coroutine[Any, Any, None]]
 
 
 class AmbientListener:
-    """STT 결과를 받아 등록된 핸들러들에게 전달."""
+    """STT 결과를 받아 등록된 핸들러들에게 전달.
 
-    def __init__(self, stt: MockSTT | None = None) -> None:
-        self.stt = stt or MockSTT()
+    stt 인자가 None이면 명시적 비활성 (mock fallback 안 함). main_robot이
+    OPENAI_API_KEY 보고 WhisperVADStreamer 주입.
+    """
+
+    def __init__(self, stt: Any | None = None) -> None:
+        if stt is None:
+            raise ValueError(
+                "stt 인자 필수 — MockSTT() 또는 WhisperVADStreamer() 명시"
+            )
+        self.stt = stt
         self.handlers: list[TranscriptHandler] = []
 
     def add_handler(self, handler: TranscriptHandler) -> None:

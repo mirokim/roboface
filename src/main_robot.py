@@ -19,7 +19,9 @@ from src.brain import conversation_templates, memory, stats as robot_stats
 from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
-from src.config import AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, is_robot
+from src.config import (
+    AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, OPENAI_API_KEY, WAKE_DISABLED, is_robot,
+)
 from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
@@ -50,6 +52,14 @@ from src.tasks.work_tracker import WorkTracker
 from src.utils.logger import get_logger
 
 log = get_logger("main_robot")
+
+
+async def _voice_assistant_or_noop(ctx, face, servos, shared_mic):
+    """WAKE_DISABLED=1이면 시작 안 하고 종료. 아니면 기존 run_voice_assistant."""
+    if WAKE_DISABLED:
+        log.info("voice_assistant 비활성 (WAKE_DISABLED=1)")
+        return
+    await run_voice_assistant(ctx, face, servos=servos, mic=shared_mic)
 
 
 async def run_robot() -> None:
@@ -99,11 +109,26 @@ async def run_robot() -> None:
 
     ambient: AmbientListener | None = None
     if shared_mic is not None and AMBIENT_LISTEN:
-        # AMBIENT_LISTEN=1일 때만. 기본은 비활성 — mock STT가 가짜 발화로
-        # conversation_log 오염시키고 agent가 잘못 반응하는 문제 차단.
-        ambient = AmbientListener()
-        ambient.add_handler(schedule_extractor.handle_transcript)
-        ambient.add_handler(journal_writer.handle_transcript)
+        # AMBIENT_LISTEN=1 + OPENAI_API_KEY 있으면 진짜 STT (Whisper) 모드.
+        # 키 없으면 활성화 안 됨 — mock STT는 의도적 폴백 안 함.
+        if not OPENAI_API_KEY:
+            log.warning(
+                "AMBIENT_LISTEN=1 이지만 OPENAI_API_KEY 없음 — ambient 비활성"
+            )
+        else:
+            try:
+                from src.audio.stt import OpenAIWhisperSTT
+                from src.tasks.ambient_listener import WhisperVADStreamer
+                stt = OpenAIWhisperSTT()
+                streamer = WhisperVADStreamer(
+                    shared_mic, stt, perception=perception,
+                )
+                ambient = AmbientListener(stt=streamer)
+                ambient.add_handler(schedule_extractor.handle_transcript)
+                ambient.add_handler(journal_writer.handle_transcript)
+                log.info("ambient_listener 활성 — Whisper VAD always-on STT")
+            except Exception as e:
+                log.warning(f"ambient(Whisper) init 실패: {e}")
     elif shared_mic is not None:
         log.info("ambient_listener 비활성 (AMBIENT_LISTEN=1 미설정)")
 
@@ -154,9 +179,11 @@ async def run_robot() -> None:
             run_head_tracker(servos, perception, ctx),
             name="head_tracker",
         ),
-        # 음성 어시스턴트 — wake word → STT → Claude → TTS
+        # 음성 어시스턴트 — wake word → STT → Claude → TTS.
+        # WAKE_DISABLED=1이면 비활성 (AMBIENT_LISTEN always-on STT와 중복 회피).
+        # 비활성 시 placeholder no-op 코루틴 — bg_tasks 인덱스 변경 X.
         asyncio.create_task(
-            run_voice_assistant(ctx, face, servos=servos, mic=shared_mic),
+            _voice_assistant_or_noop(ctx, face, servos, shared_mic),
             name="voice_assistant",
         ),
         # 외부 명령 큐 — scripts/robot_cli.py에서 INSERT한 명령 처리.

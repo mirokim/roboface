@@ -26,7 +26,10 @@ from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
-from src.config import ANTHROPIC_API_KEY, BEHAVIOR
+from src.config import AMBIENT_LISTEN, ANTHROPIC_API_KEY, BEHAVIOR, OPENAI_API_KEY
+
+# mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
+AMBIENT_LISTEN_ACTIVE = AMBIENT_LISTEN and bool(OPENAI_API_KEY)
 from src.face import expressions as expr
 from src.face.expressions import EXPRESSIONS_BY_NAME
 from src.face.renderer import FaceState
@@ -132,7 +135,30 @@ _INFO_TOOLS = {"recall"}
 _MAX_AGENT_ROUNDS = 3
 
 
-_AGENT_SYSTEM = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Roboface'의 두뇌입니다.
+_MIC_GUIDANCE_NO_MIC = """- **마이크 미장착** — 사용자는 지금 음성 입력 수단이 없음.
+  - 컨텍스트의 "최근 대화"에 사용자 발화가 거의 없는 건 정상. "사용자가 말을 안 하는 것"이
+    아니라 "말할 수단이 없는 것". 절대 다음 같은 멘트 X:
+    "왜 조용해?" / "말 좀 해봐" / "오늘 말이 없네" / "대답 안 해?" / "심심한가봐 너"
+  - 사용자 의사는 **표정/시선/제스처/위치/활동성**으로만 전달됨. 그걸 신호로 읽어.
+  - 가끔 사용자가 키보드로 "fake_speak"을 보내거나, ambient_listener(mock)가 텍스트를
+    꽂아주는 경우는 있음. 그건 컨텍스트에 "사용자: ..." 형태로 나타나니 정상 발화로 취급."""
+
+_MIC_GUIDANCE_WITH_STT = """- **마이크 + STT 항상 활성** — 사용자 발화는 자동으로 텍스트화돼 컨텍스트에 나타남.
+  - "최근 대화"의 "사용자: ..." 라인은 진짜 사용자 발화 (Whisper로 텍스트화됨).
+    농담/지나가는 혼잣말/옆 사람과 대화도 포함될 수 있음 — 매번 응답하지 마.
+  - **나한테 직접 말 거는 신호**가 있을 때만 응답:
+    이름 부름 ("로보야", "야") / 직접 질문 ("뭐 해?") / 시선이 나를 향하면서 말함.
+  - 옆 사람과 대화, 혼잣말, 통화 중 같은 발화는 듣기만. 끼어들지 마.
+  - STT는 짧은 잡음("아", "음", "어")도 가끔 잡힘 — 의미 없으면 do_nothing.
+  - 사용자가 "조용히 해", "그만" 같은 명확한 신호 주면 잠깐 더 침묵."""
+
+
+_MIC_GUIDANCE = (
+    _MIC_GUIDANCE_WITH_STT if AMBIENT_LISTEN_ACTIVE else _MIC_GUIDANCE_NO_MIC
+)
+
+
+_AGENT_SYSTEM_RAW = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Roboface'의 두뇌입니다.
 
 # 캐릭터 (사람처럼 — 봇 X)
 
@@ -181,13 +207,7 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
   명령 내리는 건 dance 정도. 머리 방향이 center가 아니면 보통 추적 중인 상태.
 - LCD에 내 표정이 보임. "내 표정"이 사용자에게 노출되는 상태 — sad면 사용자도 그걸 봐.
 - 내 컨디션은 stats가 관리 (배고픔/심심함/외로움 등). 멘트 톤에 자연스럽게 반영.
-- **마이크 미장착** — 사용자는 지금 음성 입력 수단이 없음.
-  - 컨텍스트의 "최근 대화"에 사용자 발화가 거의 없는 건 정상. "사용자가 말을 안 하는 것"이
-    아니라 "말할 수단이 없는 것". 절대 다음 같은 멘트 X:
-    "왜 조용해?" / "말 좀 해봐" / "오늘 말이 없네" / "대답 안 해?" / "심심한가봐 너"
-  - 사용자 의사는 **표정/시선/제스처/위치/활동성**으로만 전달됨. 그걸 신호로 읽어.
-  - 가끔 사용자가 키보드로 "fake_speak"을 보내거나, ambient_listener(mock)가 텍스트를
-    꽂아주는 경우는 있음. 그건 컨텍스트에 "사용자: ..." 형태로 나타나니 정상 발화로 취급.
+{MIC_GUIDANCE}
 
 핵심 원칙:
 - **침묵이 기본** — 5번 중 4~5번은 do_nothing이 맞아. 말할 거 없으면 do_nothing.
@@ -286,6 +306,10 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
 - 잘못 본 것 같으면 추측 X — 그냥 침묵 또는 일반 멘트.
 - 이미지 없는 tick에는 텍스트 컨텍스트만으로 평소처럼 판단.
 """
+
+
+# placeholder를 마이크 상황에 맞는 안내로 치환 (모듈 로드 시 1회)
+_AGENT_SYSTEM = _AGENT_SYSTEM_RAW.replace("{MIC_GUIDANCE}", _MIC_GUIDANCE)
 
 
 def _ttl_cache(key: str, ttl_sec: float, fn):
