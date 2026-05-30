@@ -48,17 +48,8 @@ class AudioReactive:
         # 대화 중엔 양보
         if self.ctx.state in (State.TALKING, State.LISTENING):
             return
+        # 표정만 — 끄덕 모션 제거 (시끄러우면 산만)
         flash_expression(self.face, expr.SURPRISED, 0.5)
-        # 살짝 끄덕 (놀란 척) — head_tracker와 충돌 안 하게 lock
-        if self.servos is not None:
-            try:
-                asyncio.create_task(self._clap_nod())
-            except RuntimeError:
-                pass
-
-    async def _clap_nod(self) -> None:
-        async with motion_busy_scope(self.ctx):
-            await poses.nod(self.servos, times=1)
 
     def _on_music_start(self, bpm: float) -> None:
         if self.ctx.state in (State.TALKING, State.LISTENING):
