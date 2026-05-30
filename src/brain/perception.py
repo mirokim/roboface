@@ -55,6 +55,10 @@ class PerceptionState:
     head_tilt_deg: float | None = None
     head_angle_at: float = 0.0
 
+    # 사용자 마지막 음성 발화 시각 — ambient_listener가 STT 결과 받을 때마다 갱신.
+    # agent가 이 값 변화 보고 즉시 tick 트리거 → 응답 latency ↓.
+    last_user_speech_at: float = 0.0
+
     def update_person(self, bbox: tuple[float, float, float, float] | None,
                       distance_cm: float = -1.0,
                       keypoints: Any = None) -> None:

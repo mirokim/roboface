@@ -210,23 +210,34 @@ class AmbientListener:
     OPENAI_API_KEY 보고 WhisperVADStreamer 주입.
     """
 
-    def __init__(self, stt: Any | None = None) -> None:
+    def __init__(
+        self,
+        stt: Any | None = None,
+        perception: Any | None = None,
+    ) -> None:
         if stt is None:
             raise ValueError(
                 "stt 인자 필수 — MockSTT() 또는 WhisperVADStreamer() 명시"
             )
         self.stt = stt
+        # perception 주입 시 STT 결과마다 last_user_speech_at 갱신 →
+        # agent가 변화 감지해 즉시 tick 트리거.
+        self.perception = perception
         self.handlers: list[TranscriptHandler] = []
 
     def add_handler(self, handler: TranscriptHandler) -> None:
         self.handlers.append(handler)
 
     async def run(self) -> None:
+        import time
         async for text in self.stt.stream():
             try:
                 memory.log_user(text, kind="ambient")
             except Exception as e:
                 log.debug(f"conversation log 실패: {e}")
+            # agent가 즉시 인지하도록 perception 갱신
+            if self.perception is not None:
+                self.perception.last_user_speech_at = time.time()
             for h in self.handlers:
                 try:
                     await h(text)

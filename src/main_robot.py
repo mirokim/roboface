@@ -118,7 +118,7 @@ async def run_robot() -> None:
             streamer = WhisperVADStreamer(
                 shared_mic, stt, perception=perception,
             )
-            ambient = AmbientListener(stt=streamer)
+            ambient = AmbientListener(stt=streamer, perception=perception)
             ambient.add_handler(schedule_extractor.handle_transcript)
             ambient.add_handler(journal_writer.handle_transcript)
             log.info("ambient_listener 활성 — VAD always-on STT")
