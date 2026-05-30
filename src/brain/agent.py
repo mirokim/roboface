@@ -313,10 +313,11 @@ quirks (캐릭터 일관성 — 발화 톤에 녹여):
   단, 매 tick 검색 X — 진짜 필요할 때만.
 
 대화 기록 형식:
-- 그냥 텍스트 = 음성 발화 (사용자 또는 내가)
-- 괄호 안 텍스트 = 비언어 이벤트 (손짓/움직임/거리 변화)
-  예: "사용자: (손 흔듦)" "나: 안녕!" → 이미 인사 끝, 또 인사 X
-  예: "사용자: (자리 비움)" → 부재 중, 보통 침묵
+- "최근 대화"엔 진짜 음성 발화만 줄별 표시됨.
+- "(비언어 이벤트: orientation×N, presence_new×M, ...)" 요약은 카메라 노이즈
+  포함된 통계 — **사실로 단정 X**. 예: presence_new×10이 사용자가 진짜
+  10번 들어왔다 나갔다 한 게 아니라, 컵 들어 잠깐 가린 게 10번일 수도.
+  **절대 "넌 자꾸 들락거리네", "또 나갔다 왔어?" 같은 멘트 X.**
 - 즉각 반응(wave/끄덕임/등장)은 이미 규칙으로 응답된 상태 — 또 말할 필요 X.
 
 도구 사용 다양성:
@@ -367,6 +368,19 @@ def _ttl_cache(key: str, ttl_sec: float, fn):
 _SITUATION_CACHE: dict[str, tuple[float, Any]] = {}
 
 
+# 비언어 이벤트 kind — agent 컨텍스트에선 요약만, 줄별 표시 X.
+# orientation/presence/distance 등이 매 분 수십 건 쌓여 agent가 '들락거린다'
+# 같은 잘못된 결론 내리는 거 차단.
+_NONVERBAL_KINDS = {
+    "orientation",
+    "presence_new", "presence_left", "reappear",
+    "distance_closer", "distance_farther",
+    "gesture_wave", "gesture_nod", "gesture_shake",
+    "gesture_hands_up", "gesture_gaze", "gaze_at_me",
+    "bad_posture",
+}
+
+
 def _gather_recent_messages(
     minutes: float | None = None,
     limit: int | None = None,
@@ -381,11 +395,20 @@ def _gather_recent_messages(
         return "(기록 없음)"
     if not rows:
         return "(최근 대화 없음)"
+    # 비언어 이벤트는 카운트로 요약, 실제 발화만 줄별 표시
+    nonverbal_counts: dict[str, int] = {}
     lines = []
     for r in rows:
+        kind = r.get("kind")
+        if kind in _NONVERBAL_KINDS:
+            nonverbal_counts[kind] = nonverbal_counts.get(kind, 0) + 1
+            continue
         who = "나" if r["speaker"] == "robot" else "사용자"
         lines.append(f"  - {who}: {r['text']}")
-    return "\n".join(lines)
+    if nonverbal_counts:
+        summary = ", ".join(f"{k}×{v}" for k, v in sorted(nonverbal_counts.items()))
+        lines.append(f"  - (비언어 이벤트: {summary})")
+    return "\n".join(lines) if lines else "(최근 대화 없음)"
 
 
 # 사용자 실제 음성/대화 발화만 — 비언어 이벤트(orientation, gesture_*) 제외
