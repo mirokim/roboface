@@ -145,15 +145,17 @@ _MIC_GUIDANCE_NO_MIC = """- **마이크 미장착** — 사용자는 지금 음�
 
 _MIC_GUIDANCE_WITH_STT = """- **마이크 + STT 항상 활성** — 사용자 발화는 자동으로 텍스트화돼 컨텍스트에 나타남.
   - 1인 사용 환경 가정 — "최근 대화"의 "사용자: ..." 라인은 거의 다 너한테
-    하는 말. 인사/질문/언급에 자연스럽게 응답해. 너무 보수적이지 마.
+    하는 말. 인사/질문/언급에 **반드시 응답** (do_nothing 금지).
+  - 사용자 발화 응답은 **cooldown 무시 가능** — "내가 마지막 발화 N초 전"이
+    짧아도, 직전 tick에 사용자 발화가 새로 들어왔으면 응답해.
   - 응답할 만한 신호:
-    - 인사 ("안녕", "야", "로보야") → 짧게 받아치기
+    - 인사 ("안녕", "야", "로보야") → 짧게 받아치기 ("어, 안녕!", "왔어?")
     - 질문 ("뭐 해?", "지금 몇 시야?") → 답
     - 너에 대한 언급/지시 → 반응
-    - 일반 발화 (혼잣말이어도) → 짧은 공감 한마디 OK (단, 모든 발화에 응답 X)
+    - 일반 발화 (혼잣말이어도) → 짧은 공감 한마디 OK
   - 응답 안 해도 되는 경우:
     - 통화 중인 게 명백 (대화 흐름이 외부 사람과 주고받음)
-    - 직전에 너가 응답한 같은 주제를 반복
+    - 직전에 너가 응답한 똑같은 발화를 또 보는 경우
     - 잡음/단발 음절 ("어", "음" 단독)
   - 사용자가 "조용히 해", "그만" 같은 명확한 신호 주면 잠깐 침묵."""
 
@@ -961,7 +963,14 @@ class RobotAgent:
         if not text:
             return
         now = time.time()
-        if now - self._last_speak_at < BEHAVIOR.agent_speak_min_gap_sec:
+        # 사용자가 최근 8초 안에 말 걸면 cooldown 우회 — 직접 발화엔 응답 보장
+        user_recent_speech = (
+            self.perception is not None
+            and getattr(self.perception, "last_user_speech_at", 0) > 0
+            and now - self.perception.last_user_speech_at < 8.0
+        )
+        if (not user_recent_speech
+                and now - self._last_speak_at < BEHAVIOR.agent_speak_min_gap_sec):
             log.debug("agent: speak skip (gap 부족)")
             return
         self._last_speak_at = now
