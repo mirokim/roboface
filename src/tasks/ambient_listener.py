@@ -23,6 +23,26 @@ from src.utils.logger import get_logger
 log = get_logger("ambient")
 
 
+# Whisper(로컬 + cloud) 공통 hallucination 패턴 — 약한 신호/짧은 음에서
+# 학습 데이터 잔재로 떨어지는 한국어 인사·유튜브 표현. ambient_listener에서
+# 백엔드 무관 한 곳에서 필터.
+_HALLUCINATION_PATTERNS = (
+    "구독", "좋아요", "시청해", "시청 해", "시청해 주셔",
+    "감사합니다", "고맙습니다", "고마워요", "고마워", "감사해",
+    "수고하셨습니다", "수고하셨어요", "수고하세요",
+    "안녕히 계세요", "안녕히 가세요",
+    "MBC 뉴스", "KBS 뉴스", "한국어 자막", "자막 by",
+    "이 영상", "다음 영상", "다음 시간",
+)
+
+
+def _is_hallucination(text: str) -> bool:
+    t = text.strip()
+    if not t:
+        return True
+    return any(pat in t for pat in _HALLUCINATION_PATTERNS)
+
+
 def _wav_peak(wav_bytes: bytes) -> int:
     """WAV 바이트의 PCM peak 절댓값. 빠른 신호 강도 가드용."""
     import io
@@ -168,8 +188,13 @@ class WhisperVADStreamer:
                 log.warning(f"STT 호출 실패: {e}")
                 continue
             text = (text or "").strip()
-            # 너무 짧으면 무시 (잡음/단발 음절). Whisper는 빈 발화도 단어 추측함.
+            # 너무 짧으면 무시 (잡음/단발 음절)
             if len(text) <= 2:
+                continue
+            # 백엔드 무관 hallucination 필터 — OpenAI/local 둘 다 한국어 약한
+            # 신호에 "감사합니다"/"구독 좋아요" 흔히 끼움
+            if _is_hallucination(text):
+                log.info(f'hallucination drop: "{text}"')
                 continue
             yield text
 
