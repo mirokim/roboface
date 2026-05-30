@@ -31,18 +31,21 @@ log = get_logger("head_tracker")
 # 추적 파라미터 — 적극적이지만 자잘한 움직임 X.
 # MAX_STEP_DEG × UPDATE_HZ = 초당 최대 회전 속도. 사람 자연 ~60°/sec.
 UPDATE_HZ = 15
-SMOOTHING_ALPHA = 0.15   # 0.2 → 0.15 (더 천천히 수렴 — 격렬 점프 완화)
+SMOOTHING_ALPHA = 0.10   # 0.15 → 0.10 (더 천천히 — bbox 노이즈 따라 휙 방지)
 PAN_RANGE_DEG = 70
 TILT_RANGE_DEG = 30
 RETURN_TO_CENTER_AFTER_SEC = 3
-MAX_STEP_DEG = 4.0   # 8 → 4 (60°/sec — 격렬 회전 방지. 사용자가 고개 숙였다 올릴 때 봇이 휙 따라가는 거 차단)
+MAX_STEP_DEG = 2.5   # 4 → 2.5 (37°/sec — 사람보다 약간 느리게)
 
 # 데드존 — 자잘한 떨림 방지를 위한 3단계:
-# 1) bbox 센터 자체 N프레임 평균 (입력 노이즈 제거)
+# 1) bbox 센터 자체 N프레임 median (입력 노이즈 제거 — 평균 대신 outlier 강함)
 # 2) 타깃 각도 변화가 작으면 stable target 유지 (수렴 안정성)
 # 3) 출력 각도 변화가 0.5도 이내면 서보 명령 자체 skip (PWM 떨림 방지)
 BBOX_SMOOTH_N = 8
-TARGET_DEADZONE_DEG = 3.0
+TARGET_DEADZONE_DEG = 6.0   # 3 → 6 (작은 노이즈 무시)
+# bbox가 한 프레임에 이 비율 이상 점프하면 noise로 보고 reject — 두 사람 감지
+# 시 다른 person 갑자기 잡혀서 머리 휙 돌아가는 거 차단.
+BBOX_JUMP_REJECT = 0.25
 # 출력 데드존 — breath OFF 됐으니 크게. 작은 PWM 떨림/노이즈 묻힘.
 OUTPUT_DEADZONE_DEG = 0.5
 # 서보 settle 끔 — 카메라가 머리에 함께 달린 구조에서 settle 동안 perception을
@@ -148,10 +151,30 @@ async def run_head_tracker(
         if perception.person_present:
             if not in_settle:
                 cx, cy = perception.person_bbox_center
-                # bbox 센터 스무딩 — 매 프레임 흔들리는 노이즈 평균
+                # bbox jump 가드 — 직전 프레임 대비 큰 점프(예: 다른 사람)면 reject
+                if bbox_history:
+                    last_cx, last_cy = bbox_history[-1]
+                    if (abs(cx - last_cx) > BBOX_JUMP_REJECT
+                            or abs(cy - last_cy) > BBOX_JUMP_REJECT):
+                        # 노이즈 — 이번 프레임 무시. stable target 그대로 유지.
+                        target_pan = stable_target_pan
+                        target_tilt = stable_target_tilt
+                        # fall through to clamp+smoothing 단계 (아래)
+                        target_pan = _clamp(target_pan, PAN_MIN_DEG, PAN_MAX_DEG)
+                        target_tilt = _clamp(target_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
+                        pan_delta = (target_pan - pan_current) * SMOOTHING_ALPHA
+                        tilt_delta = (target_tilt - tilt_current) * SMOOTHING_ALPHA
+                        pan_delta = _clamp(pan_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
+                        tilt_delta = _clamp(tilt_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
+                        pan_current += pan_delta
+                        tilt_current += tilt_delta
+                        continue
+                # bbox 센터 스무딩 — median (outlier 강함, 평균보다 noise 견고)
                 bbox_history.append((cx, cy))
-                avg_cx = sum(p[0] for p in bbox_history) / len(bbox_history)
-                avg_cy = sum(p[1] for p in bbox_history) / len(bbox_history)
+                sorted_x = sorted(p[0] for p in bbox_history)
+                sorted_y = sorted(p[1] for p in bbox_history)
+                avg_cx = sorted_x[len(sorted_x) // 2]
+                avg_cy = sorted_y[len(sorted_y) // 2]
 
                 # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
                 ox = avg_cx - 0.5
