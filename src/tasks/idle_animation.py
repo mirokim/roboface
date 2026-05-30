@@ -60,6 +60,9 @@ async def run_idle_gaze(
 
 _AMBIENT_MIN_INTERVAL_SEC = 20.0
 _AMBIENT_MAX_INTERVAL_SEC = 60.0
+# 사용자 있을 때는 빈도 ↓ — '딴 데 봤다가 휙 돌림' 인상 완화
+_AMBIENT_USER_PRESENT_MIN_SEC = 40.0
+_AMBIENT_USER_PRESENT_MAX_SEC = 120.0
 
 # 가끔(12%) bpm/진폭 키워 "신난 살랑이"
 _AMBIENT_LIVELY_PROB = 0.12
@@ -88,7 +91,9 @@ async def run_ambient_motion(
     while True:
         # 사용자 있을 때 빈도 절반(40-120s), 없을 때 기본(20-60s)
         if ctx.user_present:
-            wait = random.uniform(40.0, 120.0)
+            wait = random.uniform(
+                _AMBIENT_USER_PRESENT_MIN_SEC, _AMBIENT_USER_PRESENT_MAX_SEC,
+            )
         else:
             wait = random.uniform(_AMBIENT_MIN_INTERVAL_SEC, _AMBIENT_MAX_INTERVAL_SEC)
         await asyncio.sleep(wait)

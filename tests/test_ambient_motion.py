@@ -122,6 +122,8 @@ def test_ambient_motion_short_when_user_present(monkeypatch):
     monkeypatch.setattr(idle_animation.poses, "sway", fake_sway)
     monkeypatch.setattr(idle_animation, "_AMBIENT_MIN_INTERVAL_SEC", 0.0)
     monkeypatch.setattr(idle_animation, "_AMBIENT_MAX_INTERVAL_SEC", 0.001)
+    monkeypatch.setattr(idle_animation, "_AMBIENT_USER_PRESENT_MIN_SEC", 0.0)
+    monkeypatch.setattr(idle_animation, "_AMBIENT_USER_PRESENT_MAX_SEC", 0.001)
 
     ctx = StateContext()
     ctx.state = State.WATCHING
