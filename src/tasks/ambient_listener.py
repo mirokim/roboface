@@ -23,6 +23,21 @@ from src.utils.logger import get_logger
 log = get_logger("ambient")
 
 
+def _wav_peak(wav_bytes: bytes) -> int:
+    """WAV 바이트의 PCM peak 절댓값. 빠른 신호 강도 가드용."""
+    import io
+    import wave
+    import numpy as np
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            pcm = wf.readframes(wf.getnframes())
+        if not pcm:
+            return 0
+        return int(np.max(np.abs(np.frombuffer(pcm, dtype=np.int16))))
+    except Exception:
+        return 0
+
+
 def _normalize_wav_peak(
     wav_bytes: bytes, target_peak: int = 28000, max_gain: float = 50.0,
     noise_floor: int = 80,
@@ -136,6 +151,13 @@ class WhisperVADStreamer:
             if not wav:
                 # 발화 없음 — 잠깐 양보 후 다음 라운드
                 await asyncio.sleep(0.05)
+                continue
+            # 신호 너무 약하면 (마이크 noise/짧은 클릭) Whisper에 안 보냄 —
+            # base level hallucination("고맙습니다" 등) 차단 + CPU/비용 절약.
+            # peak < 400은 일반 마이크 floor 수준 — 실제 발화는 보통 1000+.
+            wav_peak = _wav_peak(wav)
+            if wav_peak < 400:
+                log.debug(f"utterance too quiet — skip (peak={wav_peak})")
                 continue
             # 마이크 게인이 낮으면 (저감도 USB 마이크) Whisper가 텍스트 못 뽑음.
             # WAV peak를 ~30000(clip 직전)으로 정규화.
