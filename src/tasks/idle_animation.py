@@ -80,24 +80,30 @@ async def run_ambient_motion(
     """평상시 가끔 sway 모션 발동.
 
     - state가 _BLOCKED_STATES면 skip
-    - 사용자 있을 때: 짧고 작은 sway (1-2 beats, 진폭 절반) — 곁눈질 같은 느낌
+    - 사용자 있을 때: 빈도 ↓ + 진폭 ↓ — sway 후 head_tracker 복귀 시
+      '갑자기 휙 돌림' 패턴 완화. 곁눈질 정도만.
     - 사용자 없을 때: 좀 더 자유롭게 (2-4 beats, 일반 진폭)
     """
     log.info("ambient motion 시작")
     while True:
-        wait = random.uniform(_AMBIENT_MIN_INTERVAL_SEC, _AMBIENT_MAX_INTERVAL_SEC)
+        # 사용자 있을 때 빈도 절반(40-120s), 없을 때 기본(20-60s)
+        if ctx.user_present:
+            wait = random.uniform(40.0, 120.0)
+        else:
+            wait = random.uniform(_AMBIENT_MIN_INTERVAL_SEC, _AMBIENT_MAX_INTERVAL_SEC)
         await asyncio.sleep(wait)
 
         if ctx.state in _BLOCKED_STATES:
             continue
 
-        # 사용자가 있으면 head_tracker를 너무 길게 끊지 않게 짧고 작게
+        # 사용자가 있으면 head_tracker를 너무 길게 끊지 않게 짧고 작게.
+        # 진폭 1.5-2.5° — 머리 거의 안 움직이는 미세 sway. 복귀 시 점프 X.
         if ctx.user_present:
             params = dict(
-                bpm=random.randint(50, 70),
-                beats=random.choice([1, 2]),
-                pan_amp_deg=random.uniform(3.0, 5.0),
-                tilt_amp_deg=random.uniform(1.0, 2.0),
+                bpm=random.randint(40, 55),
+                beats=1,
+                pan_amp_deg=random.uniform(1.5, 2.5),
+                tilt_amp_deg=random.uniform(0.5, 1.0),
             )
         elif random.random() < _AMBIENT_LIVELY_PROB:
             params = dict(bpm=80, beats=6, pan_amp_deg=10.0, tilt_amp_deg=3.0)
