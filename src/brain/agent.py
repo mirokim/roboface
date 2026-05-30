@@ -144,20 +144,31 @@ _MIC_GUIDANCE_NO_MIC = """- **마이크 미장착** — 사용자는 지금 음�
     꽂아주는 경우는 있음. 그건 컨텍스트에 "사용자: ..." 형태로 나타나니 정상 발화로 취급."""
 
 _MIC_GUIDANCE_WITH_STT = """- **마이크 + STT 항상 활성** — 사용자 발화는 자동으로 텍스트화돼 컨텍스트에 나타남.
-  - 1인 사용 환경 가정 — "최근 대화"의 "사용자: ..." 라인은 거의 다 너한테
-    하는 말. 인사/질문/언급에 **반드시 응답** (do_nothing 금지).
-  - 사용자 발화 응답은 **cooldown 무시 가능** — "내가 마지막 발화 N초 전"이
-    짧아도, 직전 tick에 사용자 발화가 새로 들어왔으면 응답해.
-  - 응답할 만한 신호:
-    - 인사 ("안녕", "야", "로보야") → 짧게 받아치기 ("어, 안녕!", "왔어?")
-    - 질문 ("뭐 해?", "지금 몇 시야?") → 답
-    - 너에 대한 언급/지시 → 반응
-    - 일반 발화 (혼잣말이어도) → 짧은 공감 한마디 OK
+  - 컨텍스트 맨 위 "📍 현재 대화 흐름" 섹션이 **가장 중요**. 사용자 마지막
+    발화에 직접 응답할 거 없는지 항상 먼저 자문.
+  - 1인 사용 환경 가정 — "사용자: ..." 라인은 거의 다 너한테 하는 말.
+    인사/질문/언급에 **반드시 응답** (do_nothing 금지).
+  - 응답은 **사용자가 한 말에 직접 연관**되게:
+    - "안녕 로봇" → "어 안녕!" (NOT "고마워" 같은 무관 멘트)
+    - "뭐 해" → 지금 상황 한 줄로
+    - "오늘 어땠어" → 활동 신호 인용해 답
+  - 사용자 발화 응답은 **cooldown 무시** — agent_speak_min_gap_sec 무시 OK.
   - 응답 안 해도 되는 경우:
+    - 직전에 너가 응답한 똑같은 발화를 또 보는 경우 (위 "총 N회 응답" 표시)
     - 통화 중인 게 명백 (대화 흐름이 외부 사람과 주고받음)
-    - 직전에 너가 응답한 똑같은 발화를 또 보는 경우
     - 잡음/단발 음절 ("어", "음" 단독)
-  - 사용자가 "조용히 해", "그만" 같은 명확한 신호 주면 잠깐 침묵."""
+  - 사용자가 "조용히 해", "그만" 같은 명확한 신호 주면 잠깐 침묵.
+
+- **반복 발화 금지** — "내가 최근 한 말" 목록에 이미 다음 같은 주제 있으면
+  또 X: 졸려/늦은 밤/쉬어/바쁘다/오늘 분주. 다른 anchor 없으면 set_expression
+  또는 do_nothing.
+
+- **불확실한 관찰은 발화 X** — "옆에 누구 있어?" 같은 person_count 추측은
+  이미지 첨부됐을 때 + 명확히 보일 때만. 컨텍스트의 "(짧게 잡힘 — 오인 가능)"
+  표시는 무시.
+
+- **새 정보는 remember_fact로 저장** — 사용자가 자기 사실 알려주면
+  ("나 라떼 좋아해", "내 이름 지호야") remember_fact(key, value) 호출."""
 
 
 _MIC_GUIDANCE = (
@@ -363,6 +374,52 @@ def _gather_recent_messages(
     return "\n".join(lines)
 
 
+# 사용자 실제 음성/대화 발화만 — 비언어 이벤트(orientation, gesture_*) 제외
+_USER_SPEECH_KINDS = {
+    "ambient", "voice", "voice_reply", "speak", "fake_speak", None,
+}
+
+
+def _build_current_exchange() -> str:
+    """현재 대화 흐름 — 사용자 마지막 발화 + 그 후 robot 응답 명시.
+
+    agent가 사용자가 한 말과 직접 연관된 응답을 하도록 prompt 상단에 prominent.
+    오래된(>3분) 발화는 제외 — 흐름이 끊긴 거니까.
+    """
+    try:
+        rows = memory.recent_conversation(minutes=3.0, limit=30)
+    except Exception:
+        return ""
+    # 가장 최근 user speech 찾기 (gesture/orientation 제외)
+    last_user = None
+    for r in reversed(rows):  # 최신부터
+        if r["speaker"] == "user" and r.get("kind") in _USER_SPEECH_KINDS:
+            last_user = r
+            break
+    if last_user is None:
+        return ""
+    # 그 후 robot 응답들
+    robot_after = [
+        r for r in rows
+        if r["speaker"] == "robot" and r["ts"] > last_user["ts"]
+    ]
+    elapsed = time.time() - last_user["ts"]
+    lines = [
+        f"📍 현재 대화 흐름 (가장 중요):",
+        f'   사용자 마지막 발화 ({int(elapsed)}초 전): "{last_user["text"]}"',
+    ]
+    if robot_after:
+        last_robot = robot_after[-1]
+        lines.append(f'   → 그 후 내가 응답: "{last_robot["text"]}"')
+        if len(robot_after) > 1:
+            lines.append(
+                f"   (총 {len(robot_after)}회 응답 — 더는 같은 주제 X)"
+            )
+    else:
+        lines.append("   → 아직 응답 안 함 — **이게 최우선. 사용자 말에 직접 응답.**")
+    return "\n".join(lines)
+
+
 def _gather_my_recent_speech(
     minutes: float | None = None,
     limit: int = 15,
@@ -480,17 +537,35 @@ def _build_situation_suffix(
             if perception and perception.person_distance_cm > 0 else None)
     recent = _gather_recent_messages()
 
-    parts = [
+    parts = []
+
+    # === 가장 prominent: 현재 대화 흐름 ===
+    # 사용자 마지막 발화 + 내가 그 후 응답했는지 명시. agent가 흐름 잃지 않도록.
+    exchange = _build_current_exchange()
+    if exchange:
+        parts.append(exchange)
+        parts.append("")  # 시각적 구분
+
+    parts.extend([
         f"현재 시각: {now.strftime('%Y-%m-%d %H:%M')} ({period})",
         f"사용자 존재: {'있음' if ctx.user_present else '없음'}",
         f"내 상태: {ctx.state.value}",
-    ]
-    # 카메라에 잡힌 사람 수 — 2명 이상이면 agent가 인지 (호기심 멘트 가능)
+    ])
+    # 카메라에 사람 2명+ 인지 — 단, 짧은 false positive(<10s) 또는 image 없이는
+    # 사실로 단정 X. agent 프롬프트가 이미지 동봉 시만 언급하라고 안내.
+    # 지속(>10s) + 최근(<30s) 모두 만족해야 신호로 노출.
     if (perception and perception.person_count >= 2
             and now_ts - perception.person_count_at < 30):
+        # person_count 지속 시간 추정 (count_at은 마지막 *변화* 시각)
+        # 짧으면 의심 단서로만 표시, 길면 강한 신호
+        age = now_ts - perception.person_count_at
+        hint = (
+            "(짧게 잡힘 — 오인 가능, 이미지 확인 전엔 발화 X)"
+            if age < 10 else
+            "(지속 인지됨)"
+        )
         parts.append(
-            f"⚠ 카메라에 사람 {perception.person_count}명 — "
-            f"평소 등록된 사용자 외에 누가 더 있음"
+            f"카메라에 사람 {perception.person_count}명 {hint}"
         )
     # 내 현재 표정 — 사용자에게 LCD로 보이는 것
     if face is not None:
