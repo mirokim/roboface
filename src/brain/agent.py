@@ -760,10 +760,18 @@ class RobotAgent:
             return True
         if self.ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
             return True
-        if _is_quiet_hours():
-            return True
         if not self.ctx.user_present:
             return True
+        # quiet hours(22~7시)엔 proactive tick skip — 단, 사용자가 최근 10초
+        # 안에 직접 말 걸었으면 응답해야 자연스러움. user speech bypass 적용.
+        if _is_quiet_hours():
+            user_recent_speech = (
+                self.perception is not None
+                and getattr(self.perception, "last_user_speech_at", 0) > 0
+                and time.time() - self.perception.last_user_speech_at < 10.0
+            )
+            if not user_recent_speech:
+                return True
         return False
 
     async def run(self, interval_sec: float | None = None) -> None:
