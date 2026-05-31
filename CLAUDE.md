@@ -88,6 +88,7 @@ src/
 │   ├── proactive_speaker.py  ← 트리거 → 멘트 → 발화
 │   ├── behavior_speaker.py   ← 이벤트 즉시 멘트 (wave_back/reappear)
 │   ├── voice_assistant.py    ← wake → STT → Claude → TTS
+│   ├── voice_commands.py     ← STT 트리거 시스템 명령 ("디버그 모드"→폰 테더링)
 │   ├── work_tracker.py       ← 작업 세션 + 휴식 임계
 │   ├── posture_monitor.py    ← 자세 감시 + perception.posture_category 갱신
 │   ├── activity_monitor.py   ← 60초 윈도우 keypoint 변동량 → activity_level
@@ -215,6 +216,7 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 - `.env` 권장 셋: `AMBIENT_LISTEN=1`, `WAKE_DISABLED=1`, `TTS_DISABLED=1`, `STT_BACKEND=openai` (마이크 약해서 local small도 정확도 낮음)
 - 박수/음악 비트는 audio_reactive가 별도 처리 — 박수 시 SURPRISED 표정만(끄덕 모션 X)
 - **STT 청취 인디케이터**: VAD 발화 감지 시 `face.recording=True`(LCD 우상단 빨간 dot 깜빡임), 발화 끝 자동 off. `WhisperVADStreamer(face=...)` 주입, `VADRecorder(on_speech_start/on_speech_end)` 콜백 (finally로 stuck on 방지). (transcript echo는 거슬려서 제거 — recording dot만 유지)
+- **음성 시스템 명령** ([src/tasks/voice_commands.py](src/tasks/voice_commands.py)): ambient transcript handler로 등록. "디버그 모드" 들리면 `nmcli connection up jhS26u`로 폰 테더링 wifi 전환. 회사선 폰 켜고 음성 한 번으로 전환 가능. 30s cooldown, FOCUSED→HAPPY(연결)/WORRIED(폰 꺼져있음/실패) 시각 피드백. NetworkManager 권한은 polkit rule(`/etc/polkit-1/rules.d/50-nm-roboface.rules`)로 miro 사용자 부여 — repo 외부 설치, robot setup 시 한 번만
 
 ### 인프라
 

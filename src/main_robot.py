@@ -121,6 +121,9 @@ async def run_robot() -> None:
             ambient = AmbientListener(stt=streamer, perception=perception)
             ambient.add_handler(schedule_extractor.handle_transcript)
             ambient.add_handler(journal_writer.handle_transcript)
+            # 음성 시스템 명령 ("디버그 모드" → 폰 테더링 전환 등)
+            from src.tasks.voice_commands import VoiceCommandHandler
+            ambient.add_handler(VoiceCommandHandler(face))
             log.info("ambient_listener 활성 — VAD always-on STT")
         except Exception as e:
             log.warning(f"ambient STT init 실패: {e}")
