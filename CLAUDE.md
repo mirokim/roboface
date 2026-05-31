@@ -214,7 +214,7 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 - 마이크 (CM421) → VAD → 로컬 faster-whisper or OpenAI Whisper → conversation_log → agent → LCD 말풍선
 - `.env` 권장 셋: `AMBIENT_LISTEN=1`, `WAKE_DISABLED=1`, `TTS_DISABLED=1`, `STT_BACKEND=openai` (마이크 약해서 local small도 정확도 낮음)
 - 박수/음악 비트는 audio_reactive가 별도 처리 — 박수 시 SURPRISED 표정만(끄덕 모션 X)
-- **STT 시각 피드백**: VAD 발화 감지 시 `face.recording=True`(LCD 우상단 빨간 dot 깜빡임), 발화 끝 자동 off. STT 결과(hallucination 제외) 도착 시 `face.show_speech("← ...", 2.5s)`로 transcript echo — 사용자가 자기 말이 어떻게 들렸는지 즉시 확인. `WhisperVADStreamer(face=...)` 주입, `VADRecorder(on_speech_start/on_speech_end)` 콜백 (finally로 stuck on 방지). echo prefix `"← "`로 agent 발화와 구분.
+- **STT 청취 인디케이터**: VAD 발화 감지 시 `face.recording=True`(LCD 우상단 빨간 dot 깜빡임), 발화 끝 자동 off. `WhisperVADStreamer(face=...)` 주입, `VADRecorder(on_speech_start/on_speech_end)` 콜백 (finally로 stuck on 방지). (transcript echo는 거슬려서 제거 — recording dot만 유지)
 
 ### 인프라
 

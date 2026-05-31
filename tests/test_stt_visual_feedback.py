@@ -170,12 +170,6 @@ def test_vadrecorder_callback_exception_swallowed():
 class _FaceStub:
     def __init__(self) -> None:
         self.recording = False
-        self.speech_text: str | None = None
-        self.speech_duration: float = 0.0
-
-    def show_speech(self, text: str, duration_sec: float) -> None:
-        self.speech_text = text
-        self.speech_duration = duration_sec
 
 
 def test_streamer_callbacks_toggle_face_recording():
@@ -195,26 +189,8 @@ def test_streamer_callbacks_toggle_face_recording():
     assert face.recording is False
 
 
-def test_streamer_echo_writes_speech_bubble():
-    """STT 결과가 face.show_speech로 echo."""
-    from src.tasks.ambient_listener import WhisperVADStreamer
-
-    face = _FaceStub()
-    fake_mic = MagicMock()
-    fake_mic.sample_rate = 16000
-    with patch("src.audio.mic.VADRecorder"):
-        s = WhisperVADStreamer(fake_mic, MagicMock(), face=face)
-    s._echo_transcript("내일 회의 있어")
-
-    assert face.speech_text is not None
-    assert "내일 회의 있어" in face.speech_text
-    # prefix가 붙어 다른 발화와 구분됨
-    assert face.speech_text.startswith(WhisperVADStreamer.ECHO_PREFIX)
-    assert face.speech_duration == pytest.approx(WhisperVADStreamer.ECHO_DURATION_SEC)
-
-
 def test_streamer_no_face_no_crash():
-    """face 미주입 시에도 콜백/echo 모두 안전."""
+    """face 미주입 시에도 콜백 모두 안전."""
     from src.tasks.ambient_listener import WhisperVADStreamer
 
     fake_mic = MagicMock()
@@ -224,4 +200,3 @@ def test_streamer_no_face_no_crash():
     # 다 no-op이어야 함
     s._on_speech_start()
     s._on_speech_end()
-    s._echo_transcript("test")
