@@ -44,8 +44,10 @@ MAX_STEP_DEG = 2.5   # 4 → 2.5 (37°/sec — 사람보다 약간 느리게)
 BBOX_SMOOTH_N = 8
 TARGET_DEADZONE_DEG = 6.0   # 3 → 6 (작은 노이즈 무시)
 # bbox가 한 프레임에 이 비율 이상 점프하면 noise로 보고 reject — 두 사람 감지
-# 시 다른 person 갑자기 잡혀서 머리 휙 돌아가는 거 차단.
-BBOX_JUMP_REJECT = 0.25
+# 시 다른 person 갑자기 잡혀서 머리 휙 돌아가는 거 차단. 단 연속 N프레임
+# 같은 새 위치 지속되면 진짜 사용자 이동으로 보고 받아들임 (anti-stuck).
+BBOX_JUMP_REJECT = 0.40
+BBOX_JUMP_MAX_CONSECUTIVE_REJECT = 3
 # 출력 데드존 — breath OFF 됐으니 크게. 작은 PWM 떨림/노이즈 묻힘.
 OUTPUT_DEADZONE_DEG = 0.5
 # 서보 settle 끔 — 카메라가 머리에 함께 달린 구조에서 settle 동안 perception을
@@ -131,6 +133,8 @@ async def run_head_tracker(
     last_sent_tilt = tilt_current
     # 마지막 서보 명령 시각 — settling 동안 perception 입력 무시
     last_servo_move_at = 0.0
+    # 연속 jump reject 카운터 — N회 넘으면 진짜 새 위치로 받아들임 (stuck 방지)
+    consecutive_jump_rejects = 0
 
     log.info("head tracker 시작")
 
@@ -151,46 +155,42 @@ async def run_head_tracker(
         if perception.person_present:
             if not in_settle:
                 cx, cy = perception.person_bbox_center
-                # bbox jump 가드 — 직전 프레임 대비 큰 점프(예: 다른 사람)면 reject
-                if bbox_history:
+                # bbox jump 가드 — 직전 대비 큰 점프(예: 다른 사람)면 reject.
+                # 단, 연속 N회 reject되면 진짜 새 위치라고 보고 받아들임 (stuck 방지).
+                accept_frame = True
+                if (bbox_history
+                        and consecutive_jump_rejects < BBOX_JUMP_MAX_CONSECUTIVE_REJECT):
                     last_cx, last_cy = bbox_history[-1]
                     if (abs(cx - last_cx) > BBOX_JUMP_REJECT
                             or abs(cy - last_cy) > BBOX_JUMP_REJECT):
-                        # 노이즈 — 이번 프레임 무시. stable target 그대로 유지.
-                        target_pan = stable_target_pan
-                        target_tilt = stable_target_tilt
-                        # fall through to clamp+smoothing 단계 (아래)
-                        target_pan = _clamp(target_pan, PAN_MIN_DEG, PAN_MAX_DEG)
-                        target_tilt = _clamp(target_tilt, TILT_MIN_DEG, TILT_MAX_DEG)
-                        pan_delta = (target_pan - pan_current) * SMOOTHING_ALPHA
-                        tilt_delta = (target_tilt - tilt_current) * SMOOTHING_ALPHA
-                        pan_delta = _clamp(pan_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
-                        tilt_delta = _clamp(tilt_delta, -MAX_STEP_DEG, MAX_STEP_DEG)
-                        pan_current += pan_delta
-                        tilt_current += tilt_delta
-                        continue
-                # bbox 센터 스무딩 — median (outlier 강함, 평균보다 noise 견고)
-                bbox_history.append((cx, cy))
-                sorted_x = sorted(p[0] for p in bbox_history)
-                sorted_y = sorted(p[1] for p in bbox_history)
-                avg_cx = sorted_x[len(sorted_x) // 2]
-                avg_cy = sorted_y[len(sorted_y) // 2]
+                        consecutive_jump_rejects += 1
+                        accept_frame = False
+                        # stable target 유지 — fall through해 servo smoothing은 계속
 
-                # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
-                ox = avg_cx - 0.5
-                oy = avg_cy - 0.5
-                if PAN_INVERT:
-                    ox = -ox
-                if TILT_INVERT:
-                    oy = -oy
-                new_target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
-                new_target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
+                if accept_frame:
+                    consecutive_jump_rejects = 0
+                    # bbox 센터 스무딩 — median (outlier 강함, 평균보다 noise 견고)
+                    bbox_history.append((cx, cy))
+                    sorted_x = sorted(p[0] for p in bbox_history)
+                    sorted_y = sorted(p[1] for p in bbox_history)
+                    avg_cx = sorted_x[len(sorted_x) // 2]
+                    avg_cy = sorted_y[len(sorted_y) // 2]
 
-                # 타깃 데드존: 작은 변화는 무시 (수렴 안정성)
-                if (abs(new_target_pan - stable_target_pan) > TARGET_DEADZONE_DEG
-                        or abs(new_target_tilt - stable_target_tilt) > TARGET_DEADZONE_DEG):
-                    stable_target_pan = new_target_pan
-                    stable_target_tilt = new_target_tilt
+                    # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
+                    ox = avg_cx - 0.5
+                    oy = avg_cy - 0.5
+                    if PAN_INVERT:
+                        ox = -ox
+                    if TILT_INVERT:
+                        oy = -oy
+                    new_target_pan = PAN_CENTER_DEG + ox * PAN_RANGE_DEG * 2
+                    new_target_tilt = TILT_CENTER_DEG + oy * TILT_RANGE_DEG * 2
+
+                    # 타깃 데드존: 작은 변화는 무시 (수렴 안정성)
+                    if (abs(new_target_pan - stable_target_pan) > TARGET_DEADZONE_DEG
+                            or abs(new_target_tilt - stable_target_tilt) > TARGET_DEADZONE_DEG):
+                        stable_target_pan = new_target_pan
+                        stable_target_tilt = new_target_tilt
 
             target_pan = stable_target_pan
             target_tilt = stable_target_tilt
