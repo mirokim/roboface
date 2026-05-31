@@ -71,7 +71,7 @@ src/
 │   ├── camera.py          ← IMX500 wrapper (VISION_MODE=detect/pose)
 │   ├── person_detector.py ← 사람 감지 debouncing
 │   ├── pose_gestures.py   ← wave / hands_up / nod / shake / gaze 인식
-│   ├── face_memory.py     ← 얼굴 등록/인식
+│   ├── face_memory.py     ← 얼굴 등록/인식 + 자동 학습 (가장 자주 본 얼굴 = "주인")
 │   ├── emotion_mirror.py  ← 사용자 표정 → 로봇 표정 거울
 │   └── photo_memory.py    ← 표정 캡처 + 통계
 ├── audio/                 ← 음성 (마이크 도착 시 활성)
@@ -135,7 +135,8 @@ src/
 | 시간대 분류 | [src/brain/time_of_day.py](src/brain/time_of_day.py) `period_for()` | morning/lunch/afternoon/evening/late |
 | 시스템 프롬프트(캐릭터 보이스) | [src/brain/conversation.py](src/brain/conversation.py) `SYSTEM_PROMPT` + [src/brain/agent.py](src/brain/agent.py) `_AGENT_SYSTEM` | agent용은 후자가 우선 |
 | 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing/**recall**/**remember_fact** |
-| 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame |
+| 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame/**last_user_called_at**(호명 시각) |
+| 얼굴 자동 학습 | [src/vision/face_memory.py](src/vision/face_memory.py) `FaceMemory.auto_track()`/`get_owner()` | 매칭 시 seen_count++, 미매칭 시 `auto_NNN` cluster 생성. throttle 10s. `MATCH_THRESHOLD=0.88`. `DEFAULT_OWNER_MIN_SEEN=20` 이상 cluster 중 최대 → "주인" 별명. vision_task가 매 2초 호출 → owner면 `ctx.user_name="주인"` |
 | 시간대 힌트 (식사/오후 슬럼프 등) | [src/brain/agent.py](src/brain/agent.py) `_time_hint()` | agent 프롬프트에 주입 |
 | 날씨 (OpenWeather) | [src/integrations/weather.py](src/integrations/weather.py) `WeatherClient` + `get_client()` 싱글톤 | `OPENWEATHER_API_KEY` 없으면 snapshot()→None (skip). `WEATHER_LAT/LON/LOCATION_NAME` env override. `BEHAVIOR.weather_cache_sec`(1800s) TTL + stale-while-error. agent `_tick`이 매번 await — 캐시 hit면 비용 0. `_build_situation_suffix(weather_line=...)` 한 줄 주입 |
 | 센서 이벤트 enum | [src/sensors/base.py](src/sensors/base.py) `SensorEventType` | |

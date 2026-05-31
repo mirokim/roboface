@@ -593,45 +593,63 @@ async def run_vision(
                                         flash_expression(face, STARSTRUCK, 1.5)
                                 ctx.pending_register_name = None
                             else:
-                                # 2) 인식 시도
-                                match = face_memory.recognize(face_crop)
-                                if match is not None:
-                                    if match.name != last_recognized:
-                                        last_recognized = match.name
-                                        ctx.user_name = match.name
-                                        log.info(
-                                            f"😊 인식: {match.name} "
-                                            f"(conf={match.confidence:.3f})"
-                                        )
-                                        try:
-                                            from src.brain import memory as _mem
-                                            _mem.log_user(
-                                                f"(얼굴 인식: {match.name})",
-                                                kind="face_recognized",
-                                            )
-                                        except Exception:
-                                            pass
-                                        if face is not None and ctx is not None:
-                                            from src.face.expressions import HAPPY
-                                            flash_expression(face, HAPPY, 1.0)
-                                            try:
-                                                from src.brain import stats as _stats
-                                                _stats.on_event("face_recognize")
-                                            except Exception:
-                                                pass
-                                            behavior_speaker.say(
-                                                face, ctx,
-                                                behavior_speaker.face_greeting_message(
-                                                    match.name,
-                                                ),
-                                                kind="face_recognize",
-                                                cooldown_sec=120.0,
-                                            )
-                                else:
+                                # 2) 자동 학습 — 매칭되면 seen_count++, 신규면 cluster
+                                #    생성. 가장 많이 본 cluster를 "주인"으로 승급.
+                                tracked = face_memory.auto_track(face_crop)
+                                if tracked is None:
                                     last_recognized = None
-                                    # 알 수 없는 사람 — user_name clear
                                     if ctx.user_name:
                                         ctx.user_name = None
+                                else:
+                                    cluster_name, seen_count = tracked
+                                    owner = face_memory.get_owner()
+                                    # 표시 이름 결정:
+                                    #   1) explicit name(미로 등) — 그대로
+                                    #   2) auto cluster + owner — "주인"
+                                    #   3) auto cluster + non-owner — None (게스트, 표시 X)
+                                    is_auto = cluster_name.startswith("auto_")
+                                    if not is_auto:
+                                        display_name = cluster_name
+                                    elif owner is not None and cluster_name == owner[0]:
+                                        display_name = "주인"
+                                    else:
+                                        display_name = None
+
+                                    if cluster_name != last_recognized:
+                                        last_recognized = cluster_name
+                                        log.info(
+                                            f"😊 face: {cluster_name} "
+                                            f"(seen={seen_count}, owner={owner})"
+                                        )
+                                        if display_name and display_name != ctx.user_name:
+                                            ctx.user_name = display_name
+                                            try:
+                                                from src.brain import memory as _mem
+                                                _mem.log_user(
+                                                    f"(얼굴 인식: {display_name})",
+                                                    kind="face_recognized",
+                                                )
+                                            except Exception:
+                                                pass
+                                            if face is not None:
+                                                from src.face.expressions import HAPPY
+                                                flash_expression(face, HAPPY, 1.0)
+                                                try:
+                                                    from src.brain import stats as _stats
+                                                    _stats.on_event("face_recognize")
+                                                except Exception:
+                                                    pass
+                                                behavior_speaker.say(
+                                                    face, ctx,
+                                                    behavior_speaker.face_greeting_message(
+                                                        display_name,
+                                                    ),
+                                                    kind="face_recognize",
+                                                    cooldown_sec=120.0,
+                                                )
+                                        elif display_name is None and ctx.user_name:
+                                            # auto cluster이지만 owner 아님 → 게스트
+                                            ctx.user_name = None
                 except Exception as e:
                     log.warning(f"vision frame 분석 에러: {e}")
             else:

@@ -21,8 +21,18 @@ from src.utils.logger import get_logger
 log = get_logger("face_memory")
 
 EMBED_SIZE = 32  # 32×32 = 1024-d
-MATCH_THRESHOLD = 0.94  # cosine similarity
+# 0.94 → 0.88: 같은 사람 자세/조명 변동 흡수. 다른 사람도 가끔 매칭 위험 ↑이지만
+# auto-tracking 누적 학습에선 가끔 misattribute보다 같은 사람 분리되는 게 더 나쁨
+# (주인 cluster가 여러 개로 쪼개져 seen_count 분산).
+MATCH_THRESHOLD = 0.88
 MIN_FACE_PX = 40
+
+# auto_track 카운트 throttle — 같은 사람 N초 안엔 1번만 +1 (매 frame 카운트 방지)
+_AUTO_COUNT_THROTTLE_SEC = 10.0
+# "주인" 승급 최소 seen_count — 잠깐 지나간 사람은 주인 안 됨
+DEFAULT_OWNER_MIN_SEEN = 20
+# auto cluster name prefix — explicit register와 구분
+AUTO_NAME_PREFIX = "auto_"
 
 
 @dataclass
@@ -42,6 +52,11 @@ def _ensure_db(path: Path) -> sqlite3.Connection:
             last_seen_at REAL NOT NULL
         )
     """)
+    # migration: auto-tracking 도입 시 seen_count 컬럼 추가. idempotent.
+    try:
+        conn.execute("ALTER TABLE faces ADD COLUMN seen_count INTEGER DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass   # 이미 있음
     conn.commit()
     return conn
 
@@ -139,12 +154,18 @@ class FaceMemory:
         self._load_cache()
 
     def _load_cache(self) -> None:
-        cur = self.conn.execute("SELECT name, embedding FROM faces")
+        cur = self.conn.execute(
+            "SELECT name, embedding, last_seen_at FROM faces"
+        )
         self._cache = []
-        for name, blob in cur:
+        # auto_track 카운트 throttle용 — 마지막 카운트 시각 (DB last_seen_at은
+        # recognize도 갱신해서 throttle 기준으로 직접 못 씀)
+        self._last_counted_at: dict[str, float] = {}
+        for name, blob, last_seen in cur:
             try:
                 emb = _blob_to_embedding(blob)
                 self._cache.append((name, emb))
+                self._last_counted_at[name] = float(last_seen)
             except Exception as e:
                 log.warning(f"face DB row '{name}' 로드 실패: {e}")
         log.info(f"face_memory: {len(self._cache)}명 로드")
@@ -202,6 +223,100 @@ class FaceMemory:
 
     def list_names(self) -> list[str]:
         return [n for n, _ in self._cache]
+
+    # ─── 자동 학습 (등장 빈도 누적) ───
+
+    def auto_track(self, face_crop: Any) -> tuple[str, int] | None:
+        """face_crop을 자동 cluster에 누적 학습.
+
+        흐름:
+          1) 기존 cluster와 매칭 시도 (MATCH_THRESHOLD)
+          2) 매칭되면 seen_count += 1 (단, _AUTO_COUNT_THROTTLE_SEC 안엔 skip)
+          3) 매칭 안 되면 새 "auto_N" cluster 생성 (seen_count=1)
+
+        반환: (cluster_name, current_seen_count) 또는 None (embedding 실패).
+        cluster_name은 explicit name("미로") 또는 자동("auto_001").
+        """
+        emb = compute_face_embedding(face_crop)
+        if emb is None:
+            return None
+        try:
+            import numpy as np
+        except ImportError:
+            return None
+        # best 매칭
+        best_name, best_sim = "", -1.0
+        for name, ref in self._cache:
+            sim = float(np.dot(emb, ref))
+            if sim > best_sim:
+                best_sim = sim
+                best_name = name
+        now = time.time()
+        if best_sim >= MATCH_THRESHOLD:
+            # 기존 cluster — throttled count
+            last_counted = self._last_counted_at.get(best_name, 0.0)
+            if now - last_counted >= _AUTO_COUNT_THROTTLE_SEC:
+                try:
+                    self.conn.execute(
+                        "UPDATE faces SET seen_count = seen_count + 1, "
+                        "last_seen_at = ? WHERE name = ?",
+                        (now, best_name),
+                    )
+                    self.conn.commit()
+                    self._last_counted_at[best_name] = now
+                except Exception as e:
+                    log.warning(f"seen_count 업데이트 실패: {e}")
+            # 현재 count 읽어서 반환
+            cur = self.conn.execute(
+                "SELECT seen_count FROM faces WHERE name = ?", (best_name,),
+            )
+            row = cur.fetchone()
+            count = int(row[0]) if row else 1
+            return (best_name, count)
+
+        # 새 auto cluster — 다음 auto_N 번호 찾기
+        cur = self.conn.execute(
+            f"SELECT name FROM faces WHERE name LIKE '{AUTO_NAME_PREFIX}%'"
+        )
+        existing_nums = []
+        for (name,) in cur:
+            try:
+                existing_nums.append(int(name[len(AUTO_NAME_PREFIX):]))
+            except ValueError:
+                continue
+        next_num = (max(existing_nums) + 1) if existing_nums else 1
+        new_name = f"{AUTO_NAME_PREFIX}{next_num:03d}"
+        blob = _embedding_to_blob(emb)
+        try:
+            self.conn.execute(
+                "INSERT INTO faces (name, embedding, created_at, last_seen_at, "
+                "seen_count) VALUES (?, ?, ?, ?, 1)",
+                (new_name, blob, now, now),
+            )
+            self.conn.commit()
+            self._load_cache()
+            log.info(f"face_memory: 새 자동 cluster '{new_name}' 등록")
+        except Exception as e:
+            log.warning(f"새 auto cluster 생성 실패: {e}")
+            return None
+        return (new_name, 1)
+
+    def get_owner(
+        self, min_seen: int = DEFAULT_OWNER_MIN_SEEN,
+    ) -> tuple[str, int] | None:
+        """가장 자주 등장한 cluster — (name, seen_count). min_seen 미만이면 None.
+
+        같은 count면 가장 오래된 cluster(낮은 id)가 우선.
+        """
+        cur = self.conn.execute(
+            "SELECT name, seen_count FROM faces "
+            "WHERE seen_count >= ? ORDER BY seen_count DESC, id ASC LIMIT 1",
+            (min_seen,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return (str(row[0]), int(row[1]))
 
     def close(self) -> None:
         try:
