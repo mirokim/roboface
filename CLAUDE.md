@@ -216,7 +216,7 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 - `.env` 권장 셋: `AMBIENT_LISTEN=1`, `WAKE_DISABLED=1`, `TTS_DISABLED=1`, `STT_BACKEND=openai` (마이크 약해서 local small도 정확도 낮음)
 - 박수/음악 비트는 audio_reactive가 별도 처리 — 박수 시 SURPRISED 표정만(끄덕 모션 X)
 - **STT 청취 인디케이터**: VAD 발화 감지 시 `face.recording=True`(LCD 우상단 빨간 dot 깜빡임), 발화 끝 자동 off. `WhisperVADStreamer(face=...)` 주입, `VADRecorder(on_speech_start/on_speech_end)` 콜백 (finally로 stuck on 방지). (transcript echo는 거슬려서 제거 — recording dot만 유지)
-- **음성 시스템 명령** ([src/tasks/voice_commands.py](src/tasks/voice_commands.py)): ambient transcript handler로 등록. "디버그 모드" 들리면 `nmcli connection up jhS26u`로 폰 테더링 wifi 전환. 회사선 폰 켜고 음성 한 번으로 전환 가능. 30s cooldown, FOCUSED→HAPPY(연결)/WORRIED(폰 꺼져있음/실패) 시각 피드백. NetworkManager 권한은 polkit rule(`/etc/polkit-1/rules.d/50-nm-roboface.rules`)로 miro 사용자 부여 — repo 외부 설치, robot setup 시 한 번만
+- **음성 시스템 명령** ([src/tasks/voice_commands.py](src/tasks/voice_commands.py)): `ambient.add_system_handler()`로 등록 — consumed 발화는 conversation_log/perception/일반 handler 전부 skip(agent 노출 X). 현재 지원: (1) **"디버그 모드"** → `nmcli connection up jhS26u`(폰 테더링), 실패 시 `WIFI_FALLBACK_CHAIN`(bbang5G, SG_Open) 순차. FOCUSED→HAPPY/CONTENT/WORRIED. 30s cooldown. (2) **"셧다운"/"전원 꺼"/"shutdown"** → systemctl poweroff. confirm 패턴: 첫 발화로 10초 pending(WORRIED + 카운트), 둘째 발화로 실행. "취소"/"아니야"/"끄지마" 또는 timeout 시 해제. 단독 "꺼"는 false positive 위험으로 제외. 권한: polkit rule 두 개 — `50-nm-roboface.rules`(NetworkManager) + `50-shutdown-roboface.rules`(login1 power-off). repo 외부 설치 (robot setup 한 번만)
 
 ### 인프라
 

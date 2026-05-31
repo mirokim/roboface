@@ -138,6 +138,80 @@ def test_all_wifi_fail_gives_worried():
     assert any("전부 실패" in t or "wifi 연결" in t for t in texts)
 
 
+# ─── 셧다운 confirm 패턴 ───
+
+def test_shutdown_first_trigger_enters_pending():
+    """첫 셧다운 발화는 pending 진입만 — poweroff 호출 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_shutdown") as m:
+        r = asyncio.run(handler("셧다운"))
+    assert r is True
+    assert m.call_count == 0
+    assert handler._shutdown_pending_until > 0
+    assert face.expression_name == "worried"
+    texts = [c[0] for c in face.speech_calls]
+    assert any("정말" in t or "다시" in t for t in texts)
+
+
+def test_shutdown_second_trigger_within_window_executes():
+    """confirm 윈도우 안에 두번째 발화 → poweroff 호출."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_shutdown") as m:
+        asyncio.run(handler("셧다운"))      # 1단계
+        asyncio.run(handler("셧다운"))      # 2단계 (즉시 = 윈도우 안)
+    assert m.call_count == 1
+    assert handler._shutdown_pending_until == 0.0
+
+
+def test_shutdown_cancel_clears_pending():
+    """pending 상태에서 '취소' → 해제, poweroff 호출 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_shutdown") as m:
+        asyncio.run(handler("셧다운"))
+        r = asyncio.run(handler("취소"))
+    assert r is True
+    assert m.call_count == 0
+    assert handler._shutdown_pending_until == 0.0
+    assert face.expression_name == "content"
+
+
+def test_shutdown_timeout_auto_cancels(monkeypatch):
+    """confirm 윈도우 지나면 자동 취소 — 다음 발화는 confirm 무관."""
+    import src.tasks.voice_commands as vc
+    monkeypatch.setattr(vc, "_SHUTDOWN_CONFIRM_SEC", 0.01)
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_shutdown") as m:
+        asyncio.run(handler("셧다운"))
+        import time as _t
+        _t.sleep(0.05)
+        # timeout 후 두번째 발화 — 새 pending 진입 (실행 X)
+        r = asyncio.run(handler("셧다운"))
+    assert r is True
+    assert m.call_count == 0   # timeout으로 직전 confirm 사라짐
+
+
+def test_shutdown_trigger_variations_match():
+    """다양한 표현 매칭."""
+    face = _FaceStub()
+    for phrase in ["셧다운", "shutdown", "전원 꺼", "전원종료"]:
+        handler = VoiceCommandHandler(face)
+        r = asyncio.run(handler(phrase))
+        assert r is True, f"매칭 실패: {phrase}"
+        assert handler._shutdown_pending_until > 0
+
+
+def test_single_short_word_kkeo_does_not_trigger():
+    """단독 '꺼'는 너무 false positive 위험 → 매칭 X (전원꺼만)."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    r = asyncio.run(handler("꺼"))
+    assert r is False
+
+
 def test_cooldown_blocks_second_trigger_within_30s():
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
