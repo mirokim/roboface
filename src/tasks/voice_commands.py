@@ -8,14 +8,16 @@ ambient_listener.add_system_handler로 등록. consumed 발화는 conversation_l
   실패 시 WIFI_FALLBACK_CHAIN 순차 시도.
 - "셧다운" / "전원 꺼" → systemctl poweroff (안전 종료).
   confirm 패턴: 첫 발화로 10초 pending 진입(WORRIED), 둘째 발화로 실행.
-  "취소" 또는 timeout 시 해제. STT false positive 한 번으론 종료 안 됨.
+- "재시작" / "다시 시작" / "restart" → systemctl restart roboface (service만).
+  코드 변경 반영 / hang 회복용. 셧다운과 동일 10초 confirm 패턴.
 - "날씨 알려줘" / "날씨 어때" / "오늘 날씨" → WeatherClient.snapshot()
   결과(예: "분당 맑음 18°C · 습도 45%") LCD에 8초 표시. 30분 캐시 hit면 즉시.
 
 권한:
 - NetworkManager: /etc/polkit-1/rules.d/50-nm-roboface.rules
 - poweroff: /etc/polkit-1/rules.d/50-shutdown-roboface.rules
-  (둘 다 repo 외부 설치 — robot 한 번만)
+- systemctl restart roboface: /etc/polkit-1/rules.d/50-systemd-roboface.rules
+  (모두 repo 외부 설치 — robot 한 번만)
 """
 
 from __future__ import annotations
@@ -52,6 +54,13 @@ _SHUTDOWN_TRIGGERS = ("셧다운", "shutdown", "전원꺼", "전원종료")
 # 단독 "꺼" 같은 짧은 단어는 false positive 위험 너무 커서 제외 — "전원꺼"만
 _SHUTDOWN_CANCEL_TRIGGERS = ("취소", "cancel", "아니야", "끄지마")
 
+# 재시작 — service만 다시 (systemctl restart roboface). 코드 변경 반영용.
+# 셧다운과 동일 10초 confirm 패턴.
+_RESTART_CONFIRM_SEC = 10.0
+_RESTART_TRIGGERS = ("재시작", "다시시작", "리스타트", "restart", "리셋")
+# cancel은 셧다운과 공유 (취소/cancel/아니야) — "끄지마" 대신 일반 표현만 매칭
+_RESTART_CANCEL_TRIGGERS = ("취소", "cancel", "아니야", "하지마")
+
 # 날씨 — 명시적 패턴만 (단독 "날씨"는 일반 대화 "날씨 좋네"도 잡아 noisy).
 # _normalize 후 공백/문장부호 제거 상태 기준.
 _WEATHER_TRIGGERS = (
@@ -74,8 +83,9 @@ class VoiceCommandHandler:
     def __init__(self, face: FaceState) -> None:
         self.face = face
         self._last_triggered_at: dict[str, float] = {}
-        # 셧다운 confirm 대기 시각 — 0이면 pending 아님
+        # confirm 대기 시각 — 0이면 pending 아님. 명령별 독립.
         self._shutdown_pending_until: float = 0.0
+        self._restart_pending_until: float = 0.0
 
     async def __call__(self, text: str) -> bool:
         """ambient_listener system handler — True 반환 시 'consumed'.
@@ -107,6 +117,25 @@ class VoiceCommandHandler:
             self._shutdown_pending_until = 0.0
             self.face.show_speech("(셧다운 취소됨)", 2.0)
 
+        # 1b) 재시작 confirm 대기 중 — 셧다운과 동일 패턴
+        if self._restart_pending_until > 0 and now < self._restart_pending_until:
+            if any(t in normalized for t in _RESTART_CANCEL_TRIGGERS):
+                log.info(f'재시작 취소 (text="{text}")')
+                self._restart_pending_until = 0.0
+                self.face.apply_expression(expr.CONTENT)
+                self.face.show_speech("그냥 둘게", 2.0)
+                return True
+            if any(t in normalized for t in _RESTART_TRIGGERS):
+                log.info(f'🔄 재시작 확정 — text="{text}"')
+                self._restart_pending_until = 0.0
+                await self._perform_restart()
+                return True
+            return False
+        if self._restart_pending_until > 0 and now >= self._restart_pending_until:
+            log.info("재시작 confirm timeout — 자동 취소")
+            self._restart_pending_until = 0.0
+            self.face.show_speech("(재시작 취소됨)", 2.0)
+
         # 2) 디버그 모드
         if "디버그모드" in normalized or "debugmode" in normalized:
             last = self._last_triggered_at.get("debug_mode", 0.0)
@@ -130,6 +159,18 @@ class VoiceCommandHandler:
                 f"정말 끌까? 다시 '셧다운' (취소: '취소') · "
                 f"{int(_SHUTDOWN_CONFIRM_SEC)}초",
                 _SHUTDOWN_CONFIRM_SEC,
+            )
+            return True
+
+        # 3b) 재시작 — 셧다운보다 덜 위험하지만 confirm 동일 (false positive 보호)
+        if any(t in normalized for t in _RESTART_TRIGGERS):
+            log.info(f'🔄 재시작 1단계 (confirm 대기) — text="{text}"')
+            self._restart_pending_until = now + _RESTART_CONFIRM_SEC
+            self.face.apply_expression(expr.FOCUSED)
+            self.face.show_speech(
+                f"재시작? 다시 '재시작' (취소: '취소') · "
+                f"{int(_RESTART_CONFIRM_SEC)}초",
+                _RESTART_CONFIRM_SEC,
             )
             return True
 
@@ -203,6 +244,48 @@ class VoiceCommandHandler:
         log.info(f"🌤 {line}")
         self.face.apply_expression(expr.CONTENT)
         self.face.show_speech(line, 8.0)
+
+    async def _perform_restart(self) -> None:
+        """systemctl restart roboface — service만 다시. polkit으로 sudo 없이.
+
+        실행하면 systemd가 SIGTERM 보내 main_robot graceful shutdown 후
+        새 process 즉시 spawn. 사용자 시점엔 5초 정도 LCD 꺼졌다가 복귀.
+
+        이 메서드 자체는 systemctl 호출 후 곧 자기 process가 kill됨 —
+        post-restart 로깅은 불가능. 호출 직전에만 LCD 표시.
+        """
+        log.info("🔄 재시작 실행 — systemctl restart roboface")
+        self.face.apply_expression(expr.SLEEPY)
+        self.face.show_speech("다시 시작할게… 잠깐만.", 6.0)
+        await asyncio.sleep(0.5)   # LCD 잠시 보여줌
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "restart", "roboface",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # restart는 곧 자기 process kill — wait_for는 일반적으로 SIGTERM 받기 전에 끝남.
+            # 짧은 timeout으로 만약 명령 자체 실패하면 알 수 있게.
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=5.0,
+                )
+                if proc.returncode != 0:
+                    err = stderr_b.decode("utf-8", errors="ignore").strip()[:120]
+                    log.error(f"systemctl restart 실패 (rc={proc.returncode}): {err}")
+                    self.face.apply_expression(expr.WORRIED)
+                    self.face.show_speech(f"재시작 실패: {err[:40]}", 5.0)
+            except asyncio.TimeoutError:
+                # 정상 케이스 — systemctl이 자기를 kill하는 중. 곧 SIGTERM 받음.
+                log.info("systemctl restart 진행 중 — 곧 SIGTERM")
+        except FileNotFoundError:
+            log.error("systemctl not found")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech("systemctl 없음", 3.0)
+        except Exception as e:
+            log.error(f"restart 에러: {e}")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech(f"에러: {e}", 3.0)
 
     async def _perform_shutdown(self) -> None:
         """systemctl poweroff — polkit 권한으로 sudo 없이 실행.

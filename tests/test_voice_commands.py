@@ -212,6 +212,72 @@ def test_single_short_word_kkeo_does_not_trigger():
     assert r is False
 
 
+# ─── 재시작 confirm 패턴 ───
+
+def test_restart_first_trigger_enters_pending():
+    """첫 재시작 발화 → pending 진입만, systemctl 호출 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_restart") as m:
+        r = asyncio.run(handler("재시작"))
+    assert r is True
+    assert m.call_count == 0
+    assert handler._restart_pending_until > 0
+    assert face.expression_name == "focused"
+
+
+def test_restart_second_trigger_within_window_executes():
+    """confirm 윈도우 안에 두번째 발화 → systemctl restart 호출."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_restart") as m:
+        asyncio.run(handler("재시작"))
+        asyncio.run(handler("재시작"))
+    assert m.call_count == 1
+    assert handler._restart_pending_until == 0.0
+
+
+def test_restart_cancel_clears_pending():
+    """pending 상태에서 '취소' → 해제, systemctl 호출 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_restart") as m:
+        asyncio.run(handler("재시작"))
+        r = asyncio.run(handler("취소"))
+    assert r is True
+    assert m.call_count == 0
+    assert handler._restart_pending_until == 0.0
+
+
+def test_restart_trigger_variations_match():
+    """다양한 표현 매칭."""
+    face = _FaceStub()
+    for phrase in ["재시작", "다시 시작", "리스타트", "restart", "리셋"]:
+        h = VoiceCommandHandler(face)
+        r = asyncio.run(h(phrase))
+        assert r is True, f"매칭 실패: {phrase}"
+        assert h._restart_pending_until > 0
+
+
+def test_restart_independent_from_shutdown_pending():
+    """셧다운 pending이 진행 중이어도 재시작은 별도 pending state."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    with patch.object(VoiceCommandHandler, "_perform_shutdown") as m_s, \
+         patch.object(VoiceCommandHandler, "_perform_restart") as m_r:
+        asyncio.run(handler("셧다운"))    # shutdown pending
+        # 셧다운 pending 동안 "재시작" 발화는 셧다운 confirm 안의 "그 외"로
+        # 처리돼 일단 False 반환 (셧다운 pending 유지)
+        r = asyncio.run(handler("재시작"))
+    # 셧다운 cancel/confirm 키워드 아니므로 pass through — False
+    assert r is False
+    assert m_s.call_count == 0
+    assert m_r.call_count == 0
+    # 셧다운 pending 그대로
+    assert handler._shutdown_pending_until > 0
+    assert handler._restart_pending_until == 0.0
+
+
 # ─── 날씨 명령 ───
 
 def _weather_snap(line: str):
