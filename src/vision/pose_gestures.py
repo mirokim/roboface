@@ -183,10 +183,15 @@ class _HeadOscillationDetector:
         self._last_at = 0.0
         # 어깨너비로 정규화하기 위해 매 프레임 어깨 정보도 참고
         self._shoulder_widths: deque[float] = deque(maxlen=self.history_max)
+        # 어깨 중심도 같은 축으로 push — 어깨가 머리만큼 흔들리면 몸 전체 sway로
+        # 판단 (head 동작 아님). reset 시 함께 clear해야 stale 어깨 데이터와
+        # 새 nose 데이터가 섞이지 않음.
+        self._shoulder_axis_history: deque[float] = deque(maxlen=self.history_max)
 
     def reset(self) -> None:
         self.history.clear()
         self._shoulder_widths.clear()
+        self._shoulder_axis_history.clear()
 
     def diag(self) -> dict:
         return {
@@ -218,10 +223,6 @@ class _HeadOscillationDetector:
         # 시계열에 어깨 중심도 push해서 분리 확인
         self.history.append(float(nose[self.axis]))
         self._shoulder_widths.append(sw)
-        # 어깨 중심 좌표도 같은 축으로 push
-        if not hasattr(self, "_shoulder_axis_history"):
-            from collections import deque as _dq
-            self._shoulder_axis_history = _dq(maxlen=self.history_max)
         if self.axis == 0:
             sh_axis = float((l_sh[0] + r_sh[0]) / 2)
         else:

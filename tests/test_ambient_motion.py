@@ -36,6 +36,29 @@ def test_sway_returns_to_center():
     assert abs(servos.position.tilt - TILT_CENTER_DEG) < 1.0
 
 
+def test_sway_uses_current_position_as_base_not_center():
+    """사용자 따라가 옆을 보고 있을 때 sway는 그 위치 기준으로 흔들고
+    그 위치로 복귀해야 함 — CENTER로 휙 점프 X (휙 돌림 회귀 가드).
+    """
+    servos = MockServoController()
+    # head_tracker가 사용자 따라 옆으로 가 있는 상황
+    off_pan = PAN_CENTER_DEG - 20.0
+    off_tilt = TILT_CENTER_DEG + 5.0
+    servos.set_angles(off_pan, off_tilt)
+    assert servos.position.pan == pytest.approx(off_pan)
+
+    asyncio.run(poses.sway(servos, bpm=240, beats=2, update_hz=20))
+
+    # CENTER가 아니라 시작 위치(off)로 복귀
+    assert abs(servos.position.pan - off_pan) < 1.5, (
+        f"sway는 시작 위치({off_pan})로 복귀해야 하는데 {servos.position.pan}"
+    )
+    assert abs(servos.position.tilt - off_tilt) < 1.5
+    assert abs(servos.position.pan - PAN_CENTER_DEG) > 10.0, (
+        "CENTER로 휙 갔으면 안 됨"
+    )
+
+
 def test_state_context_has_motion_busy_flag():
     ctx = StateContext()
     assert ctx.motion_busy is False

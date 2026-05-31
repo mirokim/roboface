@@ -138,14 +138,43 @@ async def run_head_tracker(
 
     log.info("head tracker 시작")
 
+    # motion 양보 상태 트래킹 — True→False 전환 시 pan_current/tilt_current를
+    # 실제 서보 위치로 resync. 다른 모션(sway/dance/nod 등)이 서보를 옮긴 후
+    # head_tracker가 자신의 stale 내부 상태로 명령하면 휙 점프.
+    was_yielding = False
+
     while True:
         await asyncio.sleep(period)
 
-        if ctx.state in (State.TALKING, State.GREETING, State.LISTENING):
+        yielding = (
+            ctx.state in (State.TALKING, State.GREETING, State.LISTENING)
+            or ctx.motion_busy
+        )
+        if yielding:
+            was_yielding = True
             continue
-        # 다른 모션 task가 서보 점유 중이면 양보 (sway/nod/shake/dance/...)
-        if ctx.motion_busy:
-            continue
+        # 양보 풀린 직후 — 실제 서보 위치에 맞춰 내부 smoothing 상태 동기화.
+        # poses.sway/dance/nod 등이 끝에 smooth_to_async로 자신의 base로
+        # 복귀했으므로 servos.position이 신뢰할 만한 마지막 위치.
+        if was_yielding:
+            was_yielding = False
+            try:
+                pan_current = float(servos.position.pan)
+                tilt_current = float(servos.position.tilt)
+                last_sent_pan = pan_current
+                last_sent_tilt = tilt_current
+                # stable_target도 현재 위치로 reset — 다음 사용자 bbox 들어올 때
+                # TARGET_DEADZONE 기준 새 타깃 잡힘. 옛 target 그대로면 즉시 큰 delta.
+                stable_target_pan = pan_current
+                stable_target_tilt = tilt_current
+                bbox_history.clear()
+                consecutive_jump_rejects = 0
+                log.debug(
+                    f"motion 복귀 — head_tracker resync: "
+                    f"pan={pan_current:.1f} tilt={tilt_current:.1f}"
+                )
+            except Exception as e:
+                log.debug(f"resync 실패 (무시): {e}")
 
         # 서보 움직임 직후엔 카메라가 같이 흔들려서 bbox가 거짓 신호.
         # settling 동안엔 새 입력 무시하고 stable target 유지.

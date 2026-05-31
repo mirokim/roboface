@@ -168,6 +168,10 @@ async def sway(
     """은은한 살랑살랑 — 표정/입은 건드리지 않음. ambient 백그라운드용.
 
     dance보다 진폭/속도 작고, beats도 짧음. envelope으로 자연스럽게 진입/종료.
+
+    중요: base는 **현재 서보 위치** — CENTER 아님. head_tracker가 사용자 따라
+    옆을 보고 있을 때 sway가 CENTER 기준이면 시작 시 옆→정면, 끝 시 정면→옆
+    양방향 휙 발생. 현재 위치 기준으로 ± amp 흔들고 끝나면 그 위치로 복귀.
     """
     log.debug(f"sway: {bpm} BPM × {beats} beats")
     period = 60.0 / bpm
@@ -178,6 +182,10 @@ async def sway(
     phase_offset = random.uniform(0, 2 * math.pi)
     pan_amp = pan_amp_deg * random.uniform(0.7, 1.0)
     tilt_amp = tilt_amp_deg * random.uniform(0.5, 1.0)
+
+    # base = 현재 서보 위치. CENTER 강제 X — 사용자 따라가던 위치 그대로 유지.
+    base_pan = servos.position.pan
+    base_tilt = servos.position.tilt
 
     start = time.monotonic()
     try:
@@ -191,9 +199,10 @@ async def sway(
             d_pan = math.sin(phase) * pan_amp * env
             d_tilt = math.sin(phase * 1.5 + math.pi / 2) * tilt_amp * env
             servos.set_angles(
-                PAN_CENTER_DEG + d_pan,
-                TILT_CENTER_DEG + d_tilt,
+                base_pan + d_pan,
+                base_tilt + d_tilt,
             )
             await asyncio.sleep(dt)
     finally:
-        await servos.smooth_to_async(PAN_CENTER_DEG, TILT_CENTER_DEG, 0.3)
+        # 시작 위치로 부드럽게 복귀 — envelope이 0으로 잘 떨어졌어도 안전상 한 번 더.
+        await servos.smooth_to_async(base_pan, base_tilt, 0.3)
