@@ -1100,6 +1100,7 @@ class RobotAgent:
     async def _do_speak(self, inp: dict) -> None:
         text = (inp.get("text") or "").strip()
         if not text:
+            log.info(f"_do_speak skip: text 비어 있음 (inp={inp})")
             return
         now = time.time()
         # 사용자가 최근 8초 안에 말 걸면 cooldown 우회 — 직접 발화엔 응답 보장
@@ -1108,9 +1109,14 @@ class RobotAgent:
             and getattr(self.perception, "last_user_speech_at", 0) > 0
             and now - self.perception.last_user_speech_at < 8.0
         )
+        gap = now - self._last_speak_at
         if (not user_recent_speech
-                and now - self._last_speak_at < BEHAVIOR.agent_speak_min_gap_sec):
-            log.debug("agent: speak skip (gap 부족)")
+                and gap < BEHAVIOR.agent_speak_min_gap_sec):
+            log.info(
+                f"_do_speak skip: cooldown {gap:.0f}s < "
+                f"{BEHAVIOR.agent_speak_min_gap_sec:.0f}s "
+                f"(text='{text[:30]}...', user_recent={user_recent_speech})"
+            )
             return
         self._last_speak_at = now
         # 표정 함께 지정됐으면 적용 (대문자/소문자 모두 허용)
