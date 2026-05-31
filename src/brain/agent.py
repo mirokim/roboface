@@ -176,16 +176,22 @@ _MIC_GUIDANCE = (
 )
 
 
-_AGENT_SYSTEM_RAW = """당신은 사용자 책상 위 작은 캐릭터 로봇 'Roboface'의 두뇌입니다.
+_AGENT_SYSTEM_RAW = """당신은 사용자 책상 위 작은 캐릭터 로봇 '네모'의 두뇌입니다.
 
 # 🚨 최우선 규칙 (다른 모든 규칙보다 우선)
+
+**너 이름은 "네모"**. 사용자가 "네모", "네모야", "야 네모" 같이 호명하면
+→ **반드시 `speak` 호출**, 짧게 응답. cooldown/quiet hours 모두 무시.
+호명에 침묵하면 사용자가 '얘 죽었나' 의심 — 무조건 한 마디 ("응?", "왜?",
+"어 나야", "불렀어?" 등).
 
 컨텍스트 맨 위 "📍 현재 대화 흐름"에 **"아직 응답 안 함"** 표시가 있으면
 → **반드시 `speak` 호출**. do_nothing/set_expression 금지.
 응답은 사용자가 한 말과 직접 연관되게 1-2문장.
 
 예시:
-- 사용자 "안녕 로봇" → speak("어, 안녕!")
+- 사용자 "네모야" → speak("응?")
+- 사용자 "네모 안녕" → speak("어, 안녕!")
 - 사용자 "지금 뭐 해" → speak("그냥 너 보고 있었어.")
 - 사용자 "졸려" → speak("좀 쉬어.")
 - 사용자 "고마워" → speak("음, 뭘 또.")
@@ -792,17 +798,25 @@ class RobotAgent:
             return True
         if self.ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
             return True
-        if not self.ctx.user_present:
+        # 호명("네모") 최근 15초 안엔 user_present/quiet hours 모두 bypass —
+        # 사용자가 명시적으로 부른 거니 무조건 응답.
+        now = time.time()
+        user_recently_called = (
+            self.perception is not None
+            and getattr(self.perception, "last_user_called_at", 0) > 0
+            and now - self.perception.last_user_called_at < 15.0
+        )
+        if not self.ctx.user_present and not user_recently_called:
             return True
-        # quiet hours(22~7시)엔 proactive tick skip — 단, 사용자가 최근 10초
-        # 안에 직접 말 걸었으면 응답해야 자연스러움. user speech bypass 적용.
+        # quiet hours(22~7시)엔 proactive tick skip — 단, 사용자 최근 10초
+        # 안에 발화/호명이면 응답해야 자연스러움.
         if _is_quiet_hours():
             user_recent_speech = (
                 self.perception is not None
                 and getattr(self.perception, "last_user_speech_at", 0) > 0
-                and time.time() - self.perception.last_user_speech_at < 10.0
+                and now - self.perception.last_user_speech_at < 10.0
             )
-            if not user_recent_speech:
+            if not user_recent_speech and not user_recently_called:
                 return True
         return False
 
@@ -1109,13 +1123,22 @@ class RobotAgent:
             and getattr(self.perception, "last_user_speech_at", 0) > 0
             and now - self.perception.last_user_speech_at < 8.0
         )
+        # 호명("네모", "네모야") 들으면 cooldown 무조건 bypass + quiet hours 무시.
+        # user_recent_speech보다 강한 신호 — 사용자가 명시적으로 부른 것.
+        user_recently_called = (
+            self.perception is not None
+            and getattr(self.perception, "last_user_called_at", 0) > 0
+            and now - self.perception.last_user_called_at < 15.0
+        )
         gap = now - self._last_speak_at
         if (not user_recent_speech
+                and not user_recently_called
                 and gap < BEHAVIOR.agent_speak_min_gap_sec):
             log.info(
                 f"_do_speak skip: cooldown {gap:.0f}s < "
                 f"{BEHAVIOR.agent_speak_min_gap_sec:.0f}s "
-                f"(text='{text[:30]}...', user_recent={user_recent_speech})"
+                f"(text='{text[:30]}...', user_recent={user_recent_speech}, "
+                f"called={user_recently_called})"
             )
             return
         self._last_speak_at = now

@@ -43,6 +43,40 @@ def _is_hallucination(text: str) -> bool:
     return any(pat in t for pat in _HALLUCINATION_PATTERNS)
 
 
+# 로봇 이름 (캐릭터). 호명 패턴 매칭에 사용 — agent _AGENT_SYSTEM에도 동일.
+ROBOT_NAME = "네모"
+
+
+def _is_calling_robot(text: str) -> bool:
+    """사용자가 로봇 호명한 발화인지 — 호격 또는 단어 단위 시작/끝 위치.
+
+    matched:
+      - "네모야 안녕" / "야 네모" / "네모아" (호격)
+      - "네모 뭐해" / "안녕 네모" (단어 경계 시작/끝)
+    not matched (false positive 차단):
+      - "네모난 박스" (시작이지만 "네모"가 단어 아님 — 형용사 prefix)
+      - "그 네모 영화" / "이거 네모 모양" (중간 위치)
+      - "안녕 로봇" (이름 자체 X)
+    """
+    n_no_space = "".join(text.lower().split()).rstrip(".!?,~")
+    if not n_no_space:
+        return False
+    # 호격 — 공백 무관, 가장 명확한 호명 ("네모야", "야네모")
+    if f"{ROBOT_NAME}야" in n_no_space or f"{ROBOT_NAME}아" in n_no_space:
+        return True
+    if f"야{ROBOT_NAME}" in n_no_space:
+        return True
+    # 단어 단위 시작/끝 — 원본 token 단위 (단어 경계 보존).
+    # "네모난"은 "네모"로 시작하지만 separate token이라 첫 토큰 != "네모" → 매칭 X.
+    tokens = [t.lower().strip(".!?,~") for t in text.split()]
+    tokens = [t for t in tokens if t]   # 빈 토큰 제거
+    if not tokens:
+        return False
+    if tokens[0] == ROBOT_NAME or tokens[-1] == ROBOT_NAME:
+        return True
+    return False
+
+
 def _wav_peak(wav_bytes: bytes) -> int:
     """WAV 바이트의 PCM peak 절댓값. 빠른 신호 강도 가드용."""
     import io
@@ -275,8 +309,13 @@ class AmbientListener:
                 memory.log_user(text, kind="ambient")
             except Exception as e:
                 log.debug(f"conversation log 실패: {e}")
+            now_ts = time.time()
             if self.perception is not None:
-                self.perception.last_user_speech_at = time.time()
+                self.perception.last_user_speech_at = now_ts
+                # 호명 감지 — agent가 cooldown 무조건 bypass + 즉시 응답
+                if _is_calling_robot(text):
+                    self.perception.last_user_called_at = now_ts
+                    log.info(f'📣 호명 감지: "{text}"')
             for h in self.handlers:
                 try:
                     await h(text)

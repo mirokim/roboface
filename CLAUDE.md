@@ -3,6 +3,11 @@
 라즈베리파이 5 + 2.4" LCD + Pan/Tilt 서보 + AI 카메라(IMX500) 기반의
 책상 위 동반자 로봇. 시뮬레이터(Pygame) ↔ 실기(LCD) 양쪽 모드.
 
+캐릭터 이름은 **"네모"** — 사용자가 "네모"/"네모야"/"야 네모"로 호명하면
+agent가 cooldown/quiet hours 모두 bypass하고 무조건 응답 (단어 단위 매칭,
+"네모난"은 X). [ambient_listener._is_calling_robot](src/tasks/ambient_listener.py) +
+[perception.last_user_called_at](src/brain/perception.py) + [agent._do_speak / _should_skip](src/brain/agent.py).
+
 이 파일은 Claude(에이전트 / Claude Code 세션)가 매번 처음부터 코드 다 읽지 않아도
 로봇 스펙, 아키텍처, 도구, 변경 시 주의점을 빠르게 파악하도록 정리한 SSOT 인덱스다.
 

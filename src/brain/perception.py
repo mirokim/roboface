@@ -58,6 +58,10 @@ class PerceptionState:
     # 사용자 마지막 음성 발화 시각 — ambient_listener가 STT 결과 받을 때마다 갱신.
     # agent가 이 값 변화 보고 즉시 tick 트리거 → 응답 latency ↓.
     last_user_speech_at: float = 0.0
+    # 사용자가 로봇 호명("네모", "네모야" 등) 시각 — agent _do_speak가 이 값
+    # 보고 cooldown 무조건 bypass. user_speech_at은 모든 발화, called_at은
+    # 호명만 — 호명엔 절대 침묵 X.
+    last_user_called_at: float = 0.0
 
     def update_person(self, bbox: tuple[float, float, float, float] | None,
                       distance_cm: float = -1.0,
