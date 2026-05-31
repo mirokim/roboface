@@ -76,19 +76,17 @@ class AudioMonitor:
         on_clap: ClapHandler | None = None,
         on_music_start: MusicHandler | None = None,
         on_music_stop: StopHandler | None = None,
-        # 약한 마이크 + transient 박수도 잡히게 완화 (RMS + peak 두 갈래).
-        # RMS는 baseline 대비 ratio 비교 — 환경 노이즈 적응형
-        # peak는 절대 임계 — transient(짧고 강한) 신호 보호 (박수는 ~10ms peak)
-        # 둘 중 하나라도 만족하면 onset.
-        # CM421 같은 저게인 마이크 실측: 평소 abs_peak 600~1300, 박수 시도 2300~2500.
-        # peak_min 1500이면 박수 확실히 잡고, 일상 소음(키보드/식기) 일부 false +
-        # 가능. false 증가하면 alsamixer로 게인 올리고 임계 다시 ↑.
-        clap_ratio: float = 3.0,
-        clap_absolute_min: float = 350.0,    # RMS 임계 (낮춤 — 약한 박수 cover)
-        clap_peak_min: float = 1500.0,       # peak 임계 — transient 단독 트리거
-        # 0.4 → 0.25 — 두 번 빠르게 친 박수(보통 200~400ms 간격)도 두 번 다
-        # 발동하도록. _refractory_until(80ms)이 echo 방지 따로 처리.
-        clap_cooldown_sec: float = 0.25,
+        # 약한 마이크 + transient 박수 — RMS + peak 두 갈래, 둘 중 하나 만족.
+        # CM421 실측: 평소 abs_peak 600~1300, 박수 시도 2300~5500.
+        # 초기 1500/350은 너무 예민 (말소리/키보드/문 닫힘 false positive).
+        # 2500/600으로 올림 — 박수가 거의 안 약하면 잡고 일상 소음 무시.
+        # 약한 박수까지 잡고 싶으면 alsamixer로 마이크 게인 올리고 임계 다시 ↓.
+        clap_ratio: float = 3.5,
+        clap_absolute_min: float = 600.0,    # RMS 임계 (말소리 RMS 보통 400~800)
+        clap_peak_min: float = 2500.0,       # peak 임계 (박수 transient 2300~)
+        # 두 번 빠른 박수(200~400ms 간격) 두 번 다 발동하는 정도. 0.4초로 살짝
+        # 올림 — false positive 연속 차단(같은 노이즈 1~2회만 발동).
+        clap_cooldown_sec: float = 0.4,
         music_window_sec: float = 5.0,
         # 8 → 14: 박수 몇 번(3~4개)이 음악으로 오분류되는 거 차단.
         # 진짜 음악은 5초 window에 14개 onset(BPM 168) 무난히 도달.
