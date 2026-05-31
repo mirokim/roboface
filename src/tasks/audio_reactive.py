@@ -111,8 +111,13 @@ class AudioReactive:
                     self.face,
                 )
                 # 서보 노이즈 잔향 가시면 baseline 안정 후 resume — 짧게 1초.
+                # sleep이 다시 cancel 받아도(드뭄, 보통 task.cancel() 1회) resume은
+                # 무조건 호출 — paused True로 stuck되면 박수/음악 감지 영구 죽음.
                 if self._monitor is not None:
-                    await asyncio.sleep(1.0)
+                    try:
+                        await asyncio.sleep(1.0)
+                    except asyncio.CancelledError:
+                        pass
                     self._monitor.set_paused(False)
 
     async def run(self) -> None:

@@ -124,7 +124,13 @@ class WeatherClient:
                 fetched_at=time.time(),
             )
         except (KeyError, TypeError, ValueError) as e:
-            raise RuntimeError(f"OpenWeather 응답 파싱 실패: {e} (payload={payload})") from e
+            # payload 거대하면 로그 폭주 방지 — 200자로 truncate
+            payload_str = str(payload)
+            if len(payload_str) > 200:
+                payload_str = payload_str[:200] + "...(truncated)"
+            raise RuntimeError(
+                f"OpenWeather 응답 파싱 실패: {e} (payload={payload_str})"
+            ) from e
 
     async def snapshot(self) -> WeatherSnapshot | None:
         """현재 날씨. 키 없으면 None, 캐시 살아 있으면 캐시, 만료면 fetch.
