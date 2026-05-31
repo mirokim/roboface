@@ -29,7 +29,8 @@
 | 모션센서 | S3KM1110 24GHz mmWave | UART `/dev/serial0` @ 115200 |
 | 온습도 | DHT22 | GPIO 22 |
 | 카메라 | Raspberry Pi AI Camera (Sony IMX500 + RP2040) | CSI mini-22pin |
-| 오디오 | **아직 없음** — USB 스피커폰 추후 결정 | — |
+| 마이크 | COMS CM421 USB 컨퍼런스 마이크 (전방위) | USB-A. 신호 약함(peak 2-4k) — software gain + OpenAI Whisper로 보정 |
+| 스피커 | **없음** | TTS는 비활성(`TTS_DISABLED=1`), LCD 말풍선만 |
 
 ### 서보 가동 범위 (소프트 리밋, [src/config.py](src/config.py))
 - Pan: `PAN_MIN_DEG=45° ~ PAN_CENTER_DEG=135° ~ PAN_MAX_DEG=225°`
@@ -116,6 +117,7 @@ src/
 | 무엇 | 어디 | 비고 |
 |---|---|---|
 | 모드/핀맵/API 키 | [src/config.py](src/config.py) | 환경변수 우선 |
+| 음성/STT 토글 env | [src/config.py](src/config.py) | `TTS_DISABLED`, `AMBIENT_LISTEN`, `WAKE_DISABLED`, `STT_BACKEND` (auto/local/openai), `STT_LOCAL_MODEL` (tiny/base/small) |
 | 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임, agent vision 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |
 | 입 모양 ↔ 음량 임계 | `BehaviorConfig.mouth_amp_thresholds` | mouth.py/tts.py 공유 — [src/face/mouth.py](src/face/mouth.py) `shape_for_amp()` |
 | 표정 정의 | [src/face/expressions.py](src/face/expressions.py) `EXPRESSIONS_BY_NAME` | agent enum 자동 도출 |
@@ -128,7 +130,9 @@ src/
 | 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame |
 | 시간대 힌트 (식사/오후 슬럼프 등) | [src/brain/agent.py](src/brain/agent.py) `_time_hint()` | agent 프롬프트에 주입 |
 | 센서 이벤트 enum | [src/sensors/base.py](src/sensors/base.py) `SensorEventType` | |
-| DB 스키마 | [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL` | WAL 모드. 테이블: work_sessions, conversation_log, proactive_log, schedules, env_log, user_patterns, face_snapshots, command_queue, **learned_facts** |
+| DB 스키마 | [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL` + `_MIGRATIONS` | WAL 모드. 테이블: work_sessions, conversation_log, proactive_log, schedules, env_log, user_patterns, face_snapshots, command_queue, **learned_facts** (category/source/last_used_at) |
+| STT hallucination 필터 | [src/tasks/ambient_listener.py](src/tasks/ambient_listener.py) `_HALLUCINATION_PATTERNS` | 백엔드 무관 — "구독/좋아요/감사합니다/시청해" 등 한국어 Whisper 흔한 패턴. peak<400 가드도 같이 |
+| 비언어 이벤트 (agent context 노이즈) | [src/brain/agent.py](src/brain/agent.py) `_NONVERBAL_KINDS` | orientation/presence/distance/gesture_* 카운트로 요약, 줄별 표시 X |
 
 ---
 
@@ -179,7 +183,10 @@ src/
 - **새 트리거 추가**: [src/brain/triggers.py](src/brain/triggers.py)에 `check_*` 함수 + `TRIGGER_EXPRESSIONS`에 표정 매핑 추가. 누락 시 `expression_for()`가 즉시 KeyError로 알려줌.
 - **제스처 응답 추가**: [src/brain/conversation_templates.py](src/brain/conversation_templates.py) `GESTURE_POOLS`에 추가.
 - **DB 스키마 변경**: [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL`은 idempotent. 컬럼 추가는 ALTER로 직접. 마이그레이션 시스템 아직 없음.
-- **마이크 없음 전제**: [src/main_robot.py](src/main_robot.py)는 `MicCaptureError` 잡아 audio_reactive task를 빼고, voice_assistant는 자체 graceful exit. 이 패턴 유지.
+- **마이크 graceful fallback**: [src/main_robot.py](src/main_robot.py)는 `MicCaptureError` 잡아 audio_reactive task를 빼고, voice_assistant는 자체 graceful exit. 이 패턴 유지.
+- **마이크 native rate 자동**: [src/audio/mic.py](src/audio/mic.py) `Microphone._negotiate_format()` — 디바이스가 16k mono 직접 지원 안 하면 native(예: 44.1k stereo)로 캡처 후 callback에서 numpy resample/mono 변환.
+- **STT 백엔드 추상화**: [src/audio/stt.py](src/audio/stt.py) `create_stt()` 팩토리 — `STT_BACKEND=local`(faster-whisper)/`openai`(API)/`auto`(local→openai fallback). 동일 `.transcribe(wav_bytes) -> str` 인터페이스.
+- **Wake word 백엔드 추상화**: [src/audio/wake_word.py](src/audio/wake_word.py) `create_wake_word()` — `PORCUPINE_ACCESS_KEY` 있으면 Picovoice, 없으면 openWakeWord(번들 onnx). 동일 `.process_pcm(bytes) -> bool` 인터페이스.
 
 ---
 
@@ -197,20 +204,45 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 
 ---
 
-## 7. 현재 진행 (2026-05-24 기준)
+## 7. 현재 진행 (2026-05-31 기준)
 
-- 마이크 미도착 → STT/TTS/wake word 비활성, fake_speak로 시뮬레이션 (말풍선만 LCD)
-  - ambient_listener (mock STT) 자체도 비활성 — 가짜 발화로 agent 컨텍스트 오염 방지
-  - posture_monitor의 mock provider fallback도 비활성 — keypoints 없으면 skip
-- 최근 작업:
-  - 활동 추론 신호 도입 (gaze_target / activity_level / posture_category)
-  - agent multi-turn (`recall` 도구), 장기 기억 (`remember_fact` + learned_facts 테이블)
-  - agent vision (조건부 카메라 frame 첨부)
-  - 자기 인식 (자기 머리/표정/카메라 일체 사실 컨텍스트 주입)
-  - LCD 우하단 온습도 오버레이
-  - API usage 추적 (_UsageTracker — 비용 가시화, web UI 노출)
-  - mmWave 거리를 perception에 우선 적용 (bbox 추정 ±60cm → mmWave ±5cm)
-  - 발화 텍스트 이모지/괄호 무대지문 strip (`face.show_speech` 단일 통로)
-- 다음 후보: 마이크 도착 → voice_assistant 실배포 / face thread-safety helper / 모듈 분리 (agent.py, memory.py)
+### 음성 풀스택 가동
 
-스펙/설치는 [docs/parts-list.md](docs/parts-list.md), [docs/setup-pi5.md](docs/setup-pi5.md), [docs/wiring-lcd.md](docs/wiring-lcd.md) 참조.
+- 마이크 (CM421) → VAD → 로컬 faster-whisper or OpenAI Whisper → conversation_log → agent → LCD 말풍선
+- `.env` 권장 셋: `AMBIENT_LISTEN=1`, `WAKE_DISABLED=1`, `TTS_DISABLED=1`, `STT_BACKEND=openai` (마이크 약해서 local small도 정확도 낮음)
+- 박수/음악 비트는 audio_reactive가 별도 처리 — 박수 시 SURPRISED 표정만(끄덕 모션 X)
+
+### 인프라
+
+- **무선 자동 업데이트**: `roboface-update.timer` 5분 주기로 git fetch → ff-pull → restart. 보너스: web UI에서 즉시 트리거. 자세한 건 [docs/setup-auto-update.md](docs/setup-auto-update.md)
+- **wifi 우선순위**: 폰 핫스팟(`jhS26u`) priority 100, 회사 wifi autoconnect off — 회사선 폰 켜야 봇 온라인
+
+### Agent 응답성
+
+- `perception.last_user_speech_at` — STT 결과 들어오면 agent 2초 안에 tick
+- speak cooldown(90s) bypass — 사용자 발화 8초 안엔 무조건 응답
+- quiet hours(22~7시) bypass — 사용자 직접 발화엔 quiet 무시
+- `_AGENT_SYSTEM` 최상단 hard rule — `📍 현재 대화 흐름`에 "아직 응답 안 함" 보이면 speak 강제
+- `{MIC_GUIDANCE}` placeholder — `AMBIENT_LISTEN_ACTIVE`에 따라 마이크 안내 동적
+
+### 메모리
+
+- `learned_facts`에 `category`(self/user)/`source`(seed/agent/cli)/`last_used_at` 추가
+- `remember_fact`가 schedule-like 감지 시 `schedules` 테이블로 라우팅
+- agent prompt가 facts 노출할 때마다 `mark_facts_used()` — 활용도 추적
+- 비언어 이벤트(orientation/presence/distance/gesture)는 카운트로 요약 — "들락거리네" 같은 헛소리 차단
+
+### Vision/모션 안정화
+
+- `WristWaveDetector`: orientation=front gate 추가 + amp/zc 임계 강화 (false positive 79/일 → 거의 0)
+- `HeadOscillationDetector` (nod/shake): history 1.8→2.2s, cooldown 20→30s, zc 6→8
+- `head_tracker`: bbox jump>0.40 reject (+ 연속 3회 시 강제 통과), SMOOTHING 0.10, MAX_STEP 2.5°, DEADZONE 6°, median bbox 스무딩
+- `run_ambient_motion`: 사용자 있을 때 빈도 ↓ (40-120s), 진폭 1.5-2.5° (휙 돌림 완화)
+
+### 다음 후보
+
+- 더 좋은 USB 마이크/헤드셋 (현재 peak 2-4k라 OpenAI API 의존 — 신호 강하면 local로 무료 전환)
+- 한국어 wake word 학습 ("로보야") — openWakeWord 합성 데이터 학습
+- face thread-safety helper / agent.py 모듈 분리
+
+스펙/설치는 [docs/parts-list.md](docs/parts-list.md), [docs/setup-pi5.md](docs/setup-pi5.md), [docs/wiring-lcd.md](docs/wiring-lcd.md), [docs/setup-auto-update.md](docs/setup-auto-update.md) 참조.
