@@ -212,6 +212,113 @@ def test_single_short_word_kkeo_does_not_trigger():
     assert r is False
 
 
+# ─── 날씨 명령 ───
+
+def _weather_snap(line: str):
+    """WeatherSnapshot stub — one_liner만 반환."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class _S:
+        _line: str
+        def one_liner(self) -> str:
+            return self._line
+    return _S(line)
+
+
+def test_weather_trigger_shows_snapshot_line():
+    """'날씨 알려줘' → snapshot.one_liner() LCD에 표시 + CONTENT."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+
+    snap = _weather_snap("분당 맑음 18°C · 습도 45%")
+
+    async def fake_snapshot():
+        return snap
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {"snapshot": staticmethod(fake_snapshot)}),
+    ):
+        r = asyncio.run(handler("날씨 알려줘"))
+
+    assert r is True
+    assert face.expression_name == "content"
+    texts = [c[0] for c in face.speech_calls]
+    assert any("분당" in t and "18" in t for t in texts)
+
+
+def test_weather_no_api_key_returns_worried():
+    """snapshot()이 None(키 없음) → WORRIED + 안내 메시지."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+
+    async def fake_snapshot():
+        return None
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {"snapshot": staticmethod(fake_snapshot)}),
+    ):
+        r = asyncio.run(handler("날씨 어때"))
+
+    assert r is True
+    assert face.expression_name == "worried"
+    texts = [c[0] for c in face.speech_calls]
+    assert any("정보 없음" in t or "API 키" in t for t in texts)
+
+
+def test_weather_trigger_variations():
+    """여러 표현 매칭."""
+    snap = _weather_snap("분당 맑음 18°C")
+
+    async def fake_snapshot():
+        return snap
+
+    for phrase in [
+        "날씨 알려줘", "날씨 어때", "오늘 날씨", "지금 날씨",
+        "날씨가 어때", "weather", "날씨 알려주세요",
+    ]:
+        face = _FaceStub()
+        handler = VoiceCommandHandler(face)
+        with patch(
+            "src.integrations.weather.get_client",
+            return_value=type("C", (), {"snapshot": staticmethod(fake_snapshot)}),
+        ):
+            r = asyncio.run(handler(phrase))
+        assert r is True, f"매칭 실패: {phrase}"
+
+
+def test_weather_unrelated_does_not_match():
+    """일반 대화('날씨 좋네')는 매칭 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    r = asyncio.run(handler("날씨 좋네"))
+    assert r is False
+
+
+def test_weather_cooldown_blocks_rapid_repeat():
+    """짧은 cooldown — 같은 요청 반복 시 LCD 깜빡 방지."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+    snap = _weather_snap("분당 맑음 18°C")
+
+    call_count = {"n": 0}
+
+    async def fake_snapshot():
+        call_count["n"] += 1
+        return snap
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {"snapshot": staticmethod(fake_snapshot)}),
+    ):
+        asyncio.run(handler("날씨 알려줘"))
+        asyncio.run(handler("날씨 알려줘"))   # cooldown
+    # 첫번째만 실제 snapshot 호출
+    assert call_count["n"] == 1
+
+
 def test_cooldown_blocks_second_trigger_within_30s():
     face = _FaceStub()
     handler = VoiceCommandHandler(face)

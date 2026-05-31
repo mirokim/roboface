@@ -6,9 +6,11 @@ ambient_listener.add_system_handler로 등록. consumed 발화는 conversation_l
 현재 지원:
 - "디버그 모드" → nmcli connection up jhS26u (폰 테더링 wifi 전환).
   실패 시 WIFI_FALLBACK_CHAIN 순차 시도.
-- "셧다운" / "꺼" / "전원 꺼" → systemctl poweroff (안전 종료).
+- "셧다운" / "전원 꺼" → systemctl poweroff (안전 종료).
   confirm 패턴: 첫 발화로 10초 pending 진입(WORRIED), 둘째 발화로 실행.
   "취소" 또는 timeout 시 해제. STT false positive 한 번으론 종료 안 됨.
+- "날씨 알려줘" / "날씨 어때" / "오늘 날씨" → WeatherClient.snapshot()
+  결과(예: "분당 맑음 18°C · 습도 45%") LCD에 8초 표시. 30분 캐시 hit면 즉시.
 
 권한:
 - NetworkManager: /etc/polkit-1/rules.d/50-nm-roboface.rules
@@ -49,6 +51,15 @@ _SHUTDOWN_CONFIRM_SEC = 10.0
 _SHUTDOWN_TRIGGERS = ("셧다운", "shutdown", "전원꺼", "전원종료")
 # 단독 "꺼" 같은 짧은 단어는 false positive 위험 너무 커서 제외 — "전원꺼"만
 _SHUTDOWN_CANCEL_TRIGGERS = ("취소", "cancel", "아니야", "끄지마")
+
+# 날씨 — 명시적 패턴만 (단독 "날씨"는 일반 대화 "날씨 좋네"도 잡아 noisy).
+# _normalize 후 공백/문장부호 제거 상태 기준.
+_WEATHER_TRIGGERS = (
+    "날씨알려", "날씨어때", "날씨가어때", "날씨좀",
+    "오늘날씨", "지금날씨", "weather",
+)
+# 같은 질문 빠른 반복 막음 — 짧게 (캐시라 cost 없지만 LCD 깜빡 방지)
+_WEATHER_COOLDOWN_SEC = 5.0
 
 
 def _normalize(text: str) -> str:
@@ -122,6 +133,19 @@ class VoiceCommandHandler:
             )
             return True
 
+        # 4) 날씨 알려줘 — WeatherClient.snapshot() LCD 표시
+        if any(t in normalized for t in _WEATHER_TRIGGERS):
+            last = self._last_triggered_at.get("weather", 0.0)
+            if now - last < _WEATHER_COOLDOWN_SEC:
+                log.info(
+                    f"날씨 cooldown ({now - last:.0f}s < {_WEATHER_COOLDOWN_SEC})"
+                )
+                return True
+            self._last_triggered_at["weather"] = now
+            log.info(f'🌤 날씨 요청 — text="{text}"')
+            await self._announce_weather()
+            return True
+
         return False
 
     async def _connect_phone_tether(self) -> None:
@@ -159,6 +183,26 @@ class VoiceCommandHandler:
         log.warning("모든 wifi 연결 실패")
         self.face.apply_expression(expr.WORRIED)
         self.face.show_speech("wifi 연결 전부 실패", 3.0)
+
+    async def _announce_weather(self) -> None:
+        """현재 날씨 LCD에 8초 표시. WeatherClient 30분 캐시 활용."""
+        try:
+            from src.integrations.weather import get_client
+            snap = await get_client().snapshot()
+        except Exception as e:
+            log.warning(f"weather snapshot 실패: {e}")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech("날씨 정보 가져오기 실패", 3.0)
+            return
+        if snap is None:
+            log.info("weather snapshot None — OPENWEATHER_API_KEY 미설정")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech("날씨 정보 없음 (API 키 X)", 3.0)
+            return
+        line = snap.one_liner()
+        log.info(f"🌤 {line}")
+        self.face.apply_expression(expr.CONTENT)
+        self.face.show_speech(line, 8.0)
 
     async def _perform_shutdown(self) -> None:
         """systemctl poweroff — polkit 권한으로 sudo 없이 실행.
