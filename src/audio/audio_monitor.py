@@ -90,8 +90,15 @@ class AudioMonitor:
         # 발동하도록. _refractory_until(80ms)이 echo 방지 따로 처리.
         clap_cooldown_sec: float = 0.25,
         music_window_sec: float = 5.0,
-        music_min_onsets: int = 8,
+        # 8 → 14: 박수 몇 번(3~4개)이 음악으로 오분류되는 거 차단.
+        # 진짜 음악은 5초 window에 14개 onset(BPM 168) 무난히 도달.
+        # 박수 false 음악 분류 → dance → 서보 소리 → onset → 음악 유지 →
+        # 무한 dance 루프 회피. dance 중 set_paused()도 같이 사용.
+        music_min_onsets: int = 14,
         music_bpm_range: tuple[float, float] = (60.0, 160.0),
+        # raw BPM(보정 전)이 이 값 미만이면 음악 아님. 박수 4초 간격(BPM 15)이
+        # octave 보정으로 60 도달하던 거 차단.
+        music_raw_bpm_min: float = 50.0,
         music_silence_to_stop_sec: float = 4.0,
     ) -> None:
         self.mic = mic
@@ -106,6 +113,7 @@ class AudioMonitor:
         self.music_window_sec = music_window_sec
         self.music_min_onsets = music_min_onsets
         self.music_bpm_range = music_bpm_range
+        self.music_raw_bpm_min = music_raw_bpm_min
         self.music_silence_to_stop_sec = music_silence_to_stop_sec
 
         # baseline EMA (slow follower)
@@ -118,9 +126,28 @@ class AudioMonitor:
         self._refractory_until = 0.0   # 이 시각까지는 새 onset 무시
         self._music_playing = False
         self._stop = asyncio.Event()
+        # pause: 외부에서 set_paused(True)면 onset 추가/판정 skip. baseline은 계속
+        # 갱신해 환경 변화 따라감. dance/모션 중 서보 소리가 onset으로 잡혀
+        # music_playing 자가 유지하는 피드백 루프 차단용.
+        self._paused = False
 
     def stop(self) -> None:
         self._stop.set()
+
+    def set_paused(self, paused: bool) -> None:
+        """외부(audio_reactive 등)에서 onset 처리 일시 정지/재개.
+
+        paused 동안엔 onset 무시 + 음악 판정 skip. baseline은 계속 갱신.
+        resume 시 _onsets buffer clear — 잔류 onset이 새 발화/박수와 섞이지 않게.
+        """
+        if paused == self._paused:
+            return
+        self._paused = paused
+        if paused:
+            log.info("audio_monitor: 일시 정지 (onset/music 처리 skip)")
+        else:
+            self._onsets.clear()
+            log.info("audio_monitor: 재개 (onset buffer clear)")
 
     def _detect_onset(self, rms: float, now: float, peak: float = 0.0) -> bool:
         """현재 frame이 onset인지 판단 + baseline 갱신.
@@ -167,7 +194,16 @@ class AudioMonitor:
                 median = intervals[len(intervals) // 2]
                 if median <= 0:
                     return
-                bpm = 60.0 / median
+                raw_bpm = 60.0 / median
+                # raw BPM 너무 낮으면(예: 박수 띄엄띄엄) 음악 아님 — octave 보정 전.
+                # 박수 4초 간격(BPM 15) × 4(보정) = 60에 도달해도 reject.
+                if raw_bpm < self.music_raw_bpm_min:
+                    log.debug(
+                        f"raw_bpm={raw_bpm:.1f} < {self.music_raw_bpm_min} — "
+                        f"음악 아님 (박수/단발 소리 가능)"
+                    )
+                    return
+                bpm = raw_bpm
                 # 2x/0.5x 보정 (octave error 정도)
                 while bpm < self.music_bpm_range[0]:
                     bpm *= 2
@@ -243,7 +279,11 @@ class AudioMonitor:
                 now = time.monotonic()
                 rms_peak_window = max(rms_peak_window, rms)
                 abs_peak_window = max(abs_peak_window, peak)
-                if self._detect_onset(rms, now, peak=peak):
+                # paused 동안엔 onset/박수/음악 처리 전부 skip. baseline은 계속
+                # 갱신되도록 _detect_onset은 호출(반환값 무시) — 환경 추적 유지.
+                if self._paused:
+                    self._detect_onset(rms, now, peak=peak)
+                elif self._detect_onset(rms, now, peak=peak):
                     # 모든 onset 로그 — RMS/peak 어느 갈래로 잡혔는지
                     log.info(
                         f"onset: rms={rms:.0f} peak={peak:.0f} "
@@ -254,7 +294,8 @@ class AudioMonitor:
                     self._maybe_clap(now)
                 frame_count += 1
                 # 매 ~0.5초 (16 frame × 30ms) music 상태 평가 (silence 동안에도 호출)
-                if frame_count % 16 == 0:
+                # paused면 skip — _onsets는 어차피 추가 안 되니 last onset stale.
+                if frame_count % 16 == 0 and not self._paused:
                     self._check_music(now)
                 # 매 ~5초 baseline + peak 로그 — 평소 마이크 신호 수준 확인.
                 # 박수가 안 잡히는 진단:

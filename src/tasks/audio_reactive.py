@@ -39,6 +39,8 @@ class AudioReactive:
         self.servos = servos
         self._music_task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # run()에서 AudioMonitor 인스턴스 보관 — _music_dance_loop이 pause 호출용
+        self._monitor: AudioMonitor | None = None
 
     # ─── 이벤트 핸들러 (audio_monitor 콜백) ───
     # 콜백은 마이크 백그라운드 스레드의 asyncio loop에서 호출됨 (audio_monitor가
@@ -77,11 +79,18 @@ class AudioReactive:
             self._music_task = None
 
     async def _music_dance_loop(self, bpm: float) -> None:
-        """음악 끝날 때까지 dance 반복. cancel되면 정리."""
+        """음악 끝날 때까지 dance 반복. cancel되면 정리.
+
+        중요: dance 중 audio_monitor pause — 서보 소리가 onset으로 잡혀
+        music_playing 유지 → 무한 dance 루프 차단. dance 끝나면 resume +
+        baseline 회복 시간(1초) 부여 후 _onsets buffer clear됨(set_paused).
+        """
         # BPM 범위 클램프
         bpm = max(70.0, min(160.0, bpm))
         self.face.apply_expression(expr.EXCITED)
         self.ctx.transition(State.GREETING, self.face)
+        if self._monitor is not None:
+            self._monitor.set_paused(True)
         # GREETING은 head_tracker가 이미 양보하지만, 명시적으로 lock도 잡아 안전.
         async with motion_busy_scope(self.ctx):
             try:
@@ -101,15 +110,19 @@ class AudioReactive:
                     State.WATCHING if self.ctx.user_present else State.IDLE,
                     self.face,
                 )
+                # 서보 노이즈 잔향 가시면 baseline 안정 후 resume — 짧게 1초.
+                if self._monitor is not None:
+                    await asyncio.sleep(1.0)
+                    self._monitor.set_paused(False)
 
     async def run(self) -> None:
-        monitor = AudioMonitor(
+        self._monitor = AudioMonitor(
             self.mic,
             on_clap=self._on_clap,
             on_music_start=self._on_music_start,
             on_music_stop=self._on_music_stop,
         )
-        await monitor.run()
+        await self._monitor.run()
 
 
 async def run_audio_reactive(
