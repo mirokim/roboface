@@ -102,9 +102,11 @@ src/
 │   ├── thermal_state.py      ← 온도 → 떨림/땀 + face.env_* 미러
 │   ├── mood_drift.py         ← 장기 기분 드리프트
 │   └── idle_animation.py     ← idle gaze + ambient motion
-├── integrations/thinktank/   ← ThinkTank(외부 시스템) 통합
-│   ├── client.py             ← HTTP + 재시도
-│   └── offline_queue.py      ← SQLite 오프라인 큐
+├── integrations/
+│   ├── thinktank/            ← ThinkTank(외부 시스템) 통합
+│   │   ├── client.py         ← HTTP + 재시도
+│   │   └── offline_queue.py  ← SQLite 오프라인 큐
+│   └── weather.py            ← OpenWeather TTL 캐시 클라이언트 (agent 컨텍스트용)
 └── utils/logger.py
 ```
 
@@ -129,6 +131,7 @@ src/
 | 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing/**recall**/**remember_fact** |
 | 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame |
 | 시간대 힌트 (식사/오후 슬럼프 등) | [src/brain/agent.py](src/brain/agent.py) `_time_hint()` | agent 프롬프트에 주입 |
+| 날씨 (OpenWeather) | [src/integrations/weather.py](src/integrations/weather.py) `WeatherClient` + `get_client()` 싱글톤 | `OPENWEATHER_API_KEY` 없으면 snapshot()→None (skip). `WEATHER_LAT/LON/LOCATION_NAME` env override. `BEHAVIOR.weather_cache_sec`(1800s) TTL + stale-while-error. agent `_tick`이 매번 await — 캐시 hit면 비용 0. `_build_situation_suffix(weather_line=...)` 한 줄 주입 |
 | 센서 이벤트 enum | [src/sensors/base.py](src/sensors/base.py) `SensorEventType` | |
 | DB 스키마 | [src/brain/memory.py](src/brain/memory.py) `SCHEMA_SQL` + `_MIGRATIONS` | WAL 모드. 테이블: work_sessions, conversation_log, proactive_log, schedules, env_log, user_patterns, face_snapshots, command_queue, **learned_facts** (category/source/last_used_at) |
 | STT hallucination 필터 | [src/tasks/ambient_listener.py](src/tasks/ambient_listener.py) `_HALLUCINATION_PATTERNS` | 백엔드 무관 — "구독/좋아요/감사합니다/시청해" 등 한국어 Whisper 흔한 패턴. peak<400 가드도 같이 |
@@ -211,6 +214,7 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 - 마이크 (CM421) → VAD → 로컬 faster-whisper or OpenAI Whisper → conversation_log → agent → LCD 말풍선
 - `.env` 권장 셋: `AMBIENT_LISTEN=1`, `WAKE_DISABLED=1`, `TTS_DISABLED=1`, `STT_BACKEND=openai` (마이크 약해서 local small도 정확도 낮음)
 - 박수/음악 비트는 audio_reactive가 별도 처리 — 박수 시 SURPRISED 표정만(끄덕 모션 X)
+- **STT 시각 피드백**: VAD 발화 감지 시 `face.recording=True`(LCD 우상단 빨간 dot 깜빡임), 발화 끝 자동 off. STT 결과(hallucination 제외) 도착 시 `face.show_speech("← ...", 2.5s)`로 transcript echo — 사용자가 자기 말이 어떻게 들렸는지 즉시 확인. `WhisperVADStreamer(face=...)` 주입, `VADRecorder(on_speech_start/on_speech_end)` 콜백 (finally로 stuck on 방지). echo prefix `"← "`로 agent 발화와 구분.
 
 ### 인프라
 
@@ -238,6 +242,10 @@ python scripts/robot_cli.py status   # 현재 상태 조회 (Phase 5.2)
 - `HeadOscillationDetector` (nod/shake): history 1.8→2.2s, cooldown 20→30s, zc 6→8
 - `head_tracker`: bbox jump>0.40 reject (+ 연속 3회 시 강제 통과), SMOOTHING 0.10, MAX_STEP 2.5°, DEADZONE 6°, median bbox 스무딩
 - `run_ambient_motion`: 사용자 있을 때 빈도 ↓ (40-120s), 진폭 1.5-2.5° (휙 돌림 완화)
+- `poses.sway`: base를 **현재 servos.position**으로 (CENTER 강제 X) — head_tracker가 옆을 보고 있어도 그 위치 기준으로 흔들고 그 위치로 복귀. CENTER 기준이던 시절엔 사용자 따라가던 위치 ↔ CENTER 양방향 휙 발생
+- `head_tracker`: motion 양보(motion_busy/TALKING/GREETING/LISTENING) 풀린 다음 cycle에 `pan_current/tilt_current/stable_target/last_sent`을 `servos.position`으로 resync — 다른 모션이 옮긴 위치와 stale 내부 상태 어긋남 방어
+- `HeadOscillationDetector.reset()`: `_shoulder_axis_history`도 함께 clear (외부 reset 후 stale 어깨 데이터와 새 nose 섞이는 버그 fix)
+- `mic._convert_native_to_target`: int() → round() — odd native rate에서 frame size off-by-one으로 VAD가 silently drop 회피
 
 ### 다음 후보
 

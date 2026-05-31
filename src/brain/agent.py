@@ -562,8 +562,13 @@ def _build_situation_suffix(
     perception: PerceptionState | None,
     work_minutes: float | None,
     face: FaceState | None = None,
+    weather_line: str | None = None,
 ) -> str:
-    """매 tick 변하는 컨텍스트 — cache 적용 X."""
+    """매 tick 변하는 컨텍스트 — cache 적용 X.
+
+    weather_line: 호출자(_tick)가 await로 가져온 한 줄 (예: "분당 맑음 18°C ...").
+    None이면 weather 섹션 자체 생략 (키 미설정/네트워크 실패).
+    """
     now = datetime.now()
     now_ts = now.timestamp()
     period = period_ko(now)
@@ -710,6 +715,10 @@ def _build_situation_suffix(
     hint = _time_hint(now)
     if hint:
         parts.append(f"시간대 힌트: {hint}")
+
+    # 날씨 — 호출자가 await로 미리 가져와 주입. 없으면 섹션 자체 생략.
+    if weather_line:
+        parts.append(f"날씨: {weather_line}")
 
     # 최근 24시간 사용자 표정 요약 — 5분 캐시 (시간 단위 변화)
     snap_summary = _ttl_cache(
@@ -865,9 +874,19 @@ class RobotAgent:
                     work_min = memory.current_work_duration(sid) / 60
                 except Exception as e:
                     log.debug(f"work duration 조회 실패: {e}")
+        # 날씨 — 캐시 hit면 즉시, 만료 시만 네트워크. 실패는 None.
+        weather_line: str | None = None
+        try:
+            from src.integrations.weather import get_client as get_weather_client
+            snap = await get_weather_client().snapshot()
+            if snap is not None:
+                weather_line = snap.one_liner()
+        except Exception as e:
+            log.debug(f"weather snapshot 실패 (무시): {e}")
         prefix = _build_situation_prefix(self.ctx)
         suffix = _build_situation_suffix(
             self.ctx, self.perception, work_min, face=self.face,
+            weather_line=weather_line,
         )
         # 직전 발화 후 사용자 반응 — 있으면 suffix 앞쪽에 prepend (눈에 띄게)
         reaction = self._post_speak_reaction_text()

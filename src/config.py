@@ -118,6 +118,13 @@ THINKTANK_ROBOT_TOKEN = os.getenv("THINKTANK_ROBOT_TOKEN", "")
 THINKTANK_TIMEOUT_SEC = 5
 THINKTANK_RETRY = 3
 
+# === OpenWeather (선택) — agent prompt에 날씨 한 줄 주입 ===
+# 키 비어 있으면 WeatherClient.snapshot()이 None 반환 → agent에서 자동 skip.
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+WEATHER_LAT = float(os.getenv("WEATHER_LAT", "37.3504"))   # 분당 default
+WEATHER_LON = float(os.getenv("WEATHER_LON", "127.108"))
+WEATHER_LOCATION_NAME = os.getenv("WEATHER_LOCATION_NAME", "분당")
+
 # === 로깅 ===
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -204,6 +211,11 @@ class BehaviorConfig:
     proactive_eval_interval_sec: float = 1.0   # proactive_speaker.run_loop
     work_tracker_interval_sec: float = 60.0    # work_tracker.run
     sensor_poll_interval_sec: float = 0.1      # SensorManager.run
+
+    # 날씨 (OpenWeather) — 매 tick 사용하지만 캐시로 API 호출 빈도 제한.
+    # 1800s(30min): 무료 tier 1M calls/month 한참 안 깸 + 날씨 변화엔 충분히 빠름.
+    weather_cache_sec: float = 1800.0
+    weather_http_timeout_sec: float = 5.0
 
 
 BEHAVIOR = BehaviorConfig()
