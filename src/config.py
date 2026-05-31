@@ -109,7 +109,9 @@ WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비
 
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 응답 빠르고 저렴
+# Haiku 4.5는 가끔 tool input 누락(speak를 빈 {}로 호출) → 사용자 발화에 응답
+# 못 함. Sonnet 4.6은 tool calling 안정. 비용 입력토큰 ~5x이지만 응답 누락 0.
+CLAUDE_MODEL = "claude-sonnet-4-6"          # agent 자율 결정 (tool calling 안정성)
 CLAUDE_MODEL_HEAVY = "claude-sonnet-4-6"    # 일정 추출 등 정밀 작업
 
 # === ThinkTank 통합 ===
