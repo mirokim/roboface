@@ -241,18 +241,40 @@ class AmbientListener:
         # agent가 변화 감지해 즉시 tick 트리거.
         self.perception = perception
         self.handlers: list[TranscriptHandler] = []
+        # 시스템 명령 handler — 일반 transcript handler보다 먼저 호출.
+        # 반환값이 truthy("consumed")면 그 발화는 conversation_log/perception에
+        # 안 들어가고 일반 handler도 skip. agent가 "왜 사용자가 그런 말 했지?"
+        # 라고 반응하는 거 차단 (예: "디버그 모드"는 wifi 전환 명령일 뿐).
+        self.system_handlers: list[TranscriptHandler] = []
 
     def add_handler(self, handler: TranscriptHandler) -> None:
         self.handlers.append(handler)
 
+    def add_system_handler(self, handler: TranscriptHandler) -> None:
+        """시스템 명령 handler. truthy 반환 시 발화 'consumed' — 일반 흐름 skip."""
+        self.system_handlers.append(handler)
+
     async def run(self) -> None:
         import time
         async for text in self.stt.stream():
+            # 1) 시스템 명령 먼저 — consumed면 일반 흐름 전부 skip
+            consumed = False
+            for h in self.system_handlers:
+                try:
+                    result = await h(text)
+                    if result:
+                        consumed = True
+                        break
+                except Exception as e:
+                    log.warning(f"system handler 에러: {e}")
+            if consumed:
+                log.info(f'system command consumed: "{text}" — log/agent skip')
+                continue
+            # 2) 일반 사용자 발화 — conversation_log 기록 + perception 갱신 + handlers
             try:
                 memory.log_user(text, kind="ambient")
             except Exception as e:
                 log.debug(f"conversation log 실패: {e}")
-            # agent가 즉시 인지하도록 perception 갱신
             if self.perception is not None:
                 self.perception.last_user_speech_at = time.time()
             for h in self.handlers:

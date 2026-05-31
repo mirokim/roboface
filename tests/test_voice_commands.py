@@ -45,7 +45,7 @@ def test_normalize_strips_whitespace_and_punct():
 
 
 def test_trigger_matches_various_phrasings():
-    """'디버그 모드입니다' 등 추가 텍스트와 함께 와도 매칭."""
+    """'디버그 모드입니다' 등 추가 텍스트와 함께 와도 매칭. consumed True 반환."""
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
 
@@ -53,21 +53,27 @@ def test_trigger_matches_various_phrasings():
         VoiceCommandHandler, "_run_nmcli_up",
         return_value=(0, "OK", ""),
     ) as m:
-        asyncio.run(handler("디버그 모드"))
-        asyncio.run(handler("이거 디버그모드 시작"))  # cooldown으로 두번째는 skip
-    # 첫번째 호출만 nmcli 발동
+        r1 = asyncio.run(handler("디버그 모드"))
+        r2 = asyncio.run(handler("이거 디버그모드 시작"))  # cooldown으로 nmcli 발동 X
+    # 둘 다 consumed (cooldown 케이스도 명령 인식 자체는 됐으니)
+    assert r1 is True
+    assert r2 is True
+    # 실제 nmcli는 첫번째만
     assert m.call_count == 1
 
 
 def test_no_trigger_for_unrelated_text():
+    """일반 발화는 False 반환 — ambient_listener가 일반 흐름 진행."""
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
     with patch.object(
         VoiceCommandHandler, "_run_nmcli_up",
         return_value=(0, "OK", ""),
     ) as m:
-        asyncio.run(handler("디버깅이 어려워"))
-        asyncio.run(handler("오늘 점심 뭐 먹지"))
+        r1 = asyncio.run(handler("디버깅이 어려워"))
+        r2 = asyncio.run(handler("오늘 점심 뭐 먹지"))
+    assert r1 is False
+    assert r2 is False
     assert m.call_count == 0
 
 

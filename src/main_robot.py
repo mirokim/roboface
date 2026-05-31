@@ -119,11 +119,13 @@ async def run_robot() -> None:
                 shared_mic, stt, perception=perception, face=face,
             )
             ambient = AmbientListener(stt=streamer, perception=perception)
+            # 음성 시스템 명령은 system_handler로 — consumed 발화는 agent/log 차단.
+            # "디버그 모드" 같은 명령이 일반 발화로 conversation_log에 쌓여 agent가
+            # "왜 그 말 했지?" 응답하는 거 방지.
+            from src.tasks.voice_commands import VoiceCommandHandler
+            ambient.add_system_handler(VoiceCommandHandler(face))
             ambient.add_handler(schedule_extractor.handle_transcript)
             ambient.add_handler(journal_writer.handle_transcript)
-            # 음성 시스템 명령 ("디버그 모드" → 폰 테더링 전환 등)
-            from src.tasks.voice_commands import VoiceCommandHandler
-            ambient.add_handler(VoiceCommandHandler(face))
             log.info("ambient_listener 활성 — VAD always-on STT")
         except Exception as e:
             log.warning(f"ambient STT init 실패: {e}")

@@ -51,19 +51,28 @@ class VoiceCommandHandler:
         self.face = face
         self._last_triggered_at: dict[str, float] = {}
 
-    async def __call__(self, text: str) -> None:
-        """ambient_listener handler 시그니처 (async def handler(text))."""
+    async def __call__(self, text: str) -> bool:
+        """ambient_listener system handler — True 반환 시 'consumed'.
+
+        consumed 발화는 conversation_log/perception에 안 들어감 — agent가
+        시스템 명령에 자연어로 반응하는 거 차단.
+        """
         normalized = _normalize(text)
         # "디버그 모드", "디버그모드", "디버그 모드입니다" 등 모두 매칭
         if "디버그모드" in normalized or "debugmode" in normalized:
             now = time.time()
             last = self._last_triggered_at.get("debug_mode", 0.0)
             if now - last < _COOLDOWN_SEC:
-                log.info(f"디버그 모드 트리거 cooldown ({now - last:.0f}s < {_COOLDOWN_SEC})")
-                return
+                log.info(
+                    f"디버그 모드 트리거 cooldown "
+                    f"({now - last:.0f}s < {_COOLDOWN_SEC})"
+                )
+                return True   # cooldown이라 동작 안 했어도 명령 자체는 consumed
             self._last_triggered_at["debug_mode"] = now
             log.info(f'🛠 디버그 모드 트리거 — text="{text}"')
             await self._connect_phone_tether()
+            return True
+        return False
 
     async def _connect_phone_tether(self) -> None:
         """폰 테더링 우선 시도 → 실패 시 fallback chain 순차 시도.
