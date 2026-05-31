@@ -80,9 +80,12 @@ class AudioMonitor:
         # RMS는 baseline 대비 ratio 비교 — 환경 노이즈 적응형
         # peak는 절대 임계 — transient(짧고 강한) 신호 보호 (박수는 ~10ms peak)
         # 둘 중 하나라도 만족하면 onset.
+        # CM421 같은 저게인 마이크 실측: 평소 abs_peak 600~1300, 박수 시도 2300~2500.
+        # peak_min 1500이면 박수 확실히 잡고, 일상 소음(키보드/식기) 일부 false +
+        # 가능. false 증가하면 alsamixer로 게인 올리고 임계 다시 ↑.
         clap_ratio: float = 3.0,
         clap_absolute_min: float = 350.0,    # RMS 임계 (낮춤 — 약한 박수 cover)
-        clap_peak_min: float = 3000.0,       # peak 임계 — transient 단독 트리거
+        clap_peak_min: float = 1500.0,       # peak 임계 — transient 단독 트리거
         # 0.4 → 0.25 — 두 번 빠르게 친 박수(보통 200~400ms 간격)도 두 번 다
         # 발동하도록. _refractory_until(80ms)이 echo 방지 따로 처리.
         clap_cooldown_sec: float = 0.25,
