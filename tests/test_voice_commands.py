@@ -86,30 +86,50 @@ def test_success_path_sets_happy_and_message():
     assert any("연결" in t for t in texts)
 
 
-def test_failure_phone_off_gives_specific_message():
+def test_fallback_chain_tries_second_wifi_on_phone_failure():
+    """폰 실패 시 fallback chain의 첫 wifi로 자동 전환."""
+    from src.tasks.voice_commands import WIFI_FALLBACK_CHAIN
+
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
-    with patch.object(
-        VoiceCommandHandler, "_run_nmcli_up",
-        return_value=(1, "", "Error: Wi-Fi network could not be found"),
-    ):
+
+    call_log: list[str] = []
+
+    async def fake_up(ssid, timeout=15.0):
+        call_log.append(ssid)
+        if ssid == PHONE_TETHER_SSID:
+            return (1, "", "Error: Wi-Fi network could not be found")
+        # 첫 fallback 성공
+        if ssid == WIFI_FALLBACK_CHAIN[0]:
+            return (0, "Connection activated", "")
+        return (1, "", "Error: timeout")
+
+    with patch.object(VoiceCommandHandler, "_run_nmcli_up", side_effect=fake_up):
         asyncio.run(handler("디버그 모드"))
-    assert face.expression_name == "worried"
+
+    # 폰 먼저 시도, 그 다음 첫 fallback
+    assert call_log[0] == PHONE_TETHER_SSID
+    assert call_log[1] == WIFI_FALLBACK_CHAIN[0]
+    # 첫 fallback 성공 → CONTENT
+    assert face.expression_name == "content"
     texts = [c[0] for c in face.speech_calls]
-    assert any("안 보임" in t or "폰 켜" in t for t in texts)
+    assert any(WIFI_FALLBACK_CHAIN[0] in t for t in texts)
 
 
-def test_generic_failure_message():
+def test_all_wifi_fail_gives_worried():
+    """폰 + 모든 fallback 다 실패 시 WORRIED + 실패 메시지."""
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
+
     with patch.object(
         VoiceCommandHandler, "_run_nmcli_up",
-        return_value=(2, "", "Error: something else"),
+        return_value=(1, "", "Error: not found"),
     ):
         asyncio.run(handler("디버그 모드"))
+
     assert face.expression_name == "worried"
     texts = [c[0] for c in face.speech_calls]
-    assert any("rc=2" in t or "실패" in t for t in texts)
+    assert any("전부 실패" in t or "wifi 연결" in t for t in texts)
 
 
 def test_cooldown_blocks_second_trigger_within_30s():

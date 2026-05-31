@@ -26,6 +26,14 @@ log = get_logger("voice_cmd")
 # 폰 테더링 wifi 프로파일 이름 (NetworkManager connection name)
 PHONE_TETHER_SSID = "jhS26u"
 
+# 폴백 chain — 폰 핫스팟 없을 때 순차 시도할 wifi 프로파일.
+# nmcli connection show로 본 robot에 등록된 이름 그대로. 새 wifi 추가하면
+# 여기 append. priority 순서: 폰 > 안정적인 집/사무실 wifi > 공용 wifi.
+WIFI_FALLBACK_CHAIN = [
+    "netplan-wlan0-bbang5G",   # 평소 메인 wifi
+    "SG_Open",                  # 공용 백업
+]
+
 # 같은 명령 빠르게 여러 번 발동 방지
 _COOLDOWN_SEC = 30.0
 
@@ -58,25 +66,40 @@ class VoiceCommandHandler:
             await self._connect_phone_tether()
 
     async def _connect_phone_tether(self) -> None:
-        """nmcli connection up — 비동기 subprocess, timeout 15s."""
+        """폰 테더링 우선 시도 → 실패 시 fallback chain 순차 시도.
+
+        성공한 첫 wifi에서 종료. 모두 실패면 WORRIED + 실패 메시지.
+        """
         self.face.apply_expression(expr.FOCUSED)
         self.face.show_speech(f"디버그 모드: {PHONE_TETHER_SSID} 연결 중…", 5.0)
 
-        rc, stdout, stderr = await self._run_nmcli_up(PHONE_TETHER_SSID, timeout=15.0)
+        # 1차 — 폰 테더링
+        rc, _, stderr = await self._run_nmcli_up(PHONE_TETHER_SSID, timeout=12.0)
         if rc == 0:
-            log.info(f"📶 {PHONE_TETHER_SSID} 연결 성공")
+            log.info(f"📶 {PHONE_TETHER_SSID} 연결 성공 (폰 테더링)")
             self.face.apply_expression(expr.HAPPY)
             self.face.show_speech("폰 테더링 연결!", 3.0)
-        else:
-            err = (stderr or stdout or "").strip()[:100]
-            # 가장 흔한 케이스: 폰 핫스팟 꺼져있음 → "Wi-Fi network could not be found"
-            if "could not be found" in err.lower() or "not found" in err.lower():
-                msg = f"{PHONE_TETHER_SSID} 안 보임 (폰 켜야)"
-            else:
-                msg = f"연결 실패 (rc={rc})"
-            log.warning(f"nmcli 실패: rc={rc}, err={err}")
-            self.face.apply_expression(expr.WORRIED)
-            self.face.show_speech(msg, 3.0)
+            return
+
+        # 2차 이후 — fallback chain
+        phone_err = (stderr or "").strip()[:80]
+        log.info(f"폰 테더링 실패 (rc={rc}): {phone_err} — 폴백 시도")
+        self.face.show_speech("폰 안 보임 — 다른 wifi 시도…", 4.0)
+
+        for ssid in WIFI_FALLBACK_CHAIN:
+            rc, _, stderr = await self._run_nmcli_up(ssid, timeout=12.0)
+            if rc == 0:
+                log.info(f"📶 폴백 wifi 연결: {ssid}")
+                self.face.apply_expression(expr.CONTENT)
+                self.face.show_speech(f"{ssid} 연결됨", 3.0)
+                return
+            err = (stderr or "").strip()[:80]
+            log.info(f"폴백 {ssid} 실패 (rc={rc}): {err}")
+
+        # 전부 실패
+        log.warning("모든 wifi 연결 실패")
+        self.face.apply_expression(expr.WORRIED)
+        self.face.show_speech("wifi 연결 전부 실패", 3.0)
 
     @staticmethod
     async def _run_nmcli_up(
