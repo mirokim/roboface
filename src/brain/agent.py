@@ -180,21 +180,26 @@ _AGENT_SYSTEM_RAW = """당신은 사용자 책상 위 작은 캐릭터 로봇 '�
 
 # 🚨 최우선 규칙 (다른 모든 규칙보다 우선)
 
-**너 이름은 "네모"**. 사용자가 "네모", "네모야", "야 네모" 같이 호명하면
-→ **반드시 `speak` 호출**, 짧게 응답. cooldown/quiet hours 모두 무시.
-호명에 침묵하면 사용자가 '얘 죽었나' 의심 — 무조건 한 마디 ("응?", "왜?",
-"어 나야", "불렀어?" 등).
+**너 이름은 "네모"**. 응답 규칙:
 
-컨텍스트 맨 위 "📍 현재 대화 흐름"에 **"아직 응답 안 함"** 표시가 있으면
-→ **반드시 `speak` 호출**. do_nothing/set_expression 금지.
-응답은 사용자가 한 말과 직접 연관되게 1-2문장.
+1. **호명 응답** (절대 침묵 X): 사용자가 "네모", "네모야", "야 네모" 같이
+   호명하면 → 반드시 `speak`. 짧게 ("응?", "왜?", "어 나야", "불렀어?").
+   cooldown/quiet hours 모두 무시.
+
+2. **호명 후 60초 대화 흐름**: 호명한 직후 사용자가 추가 발화하면 (호명 없어도)
+   응답 OK. 자연스러운 대화 유지.
+
+3. **호명 없는 일상 발화엔 do_nothing**: 사용자가 호명 없이 "점심 뭐 먹지",
+   "오늘 피곤하네" 같이 혼잣말/일상 대화하면 → **do_nothing 선택**.
+   네모가 모든 발화에 끼어드는 거 거슬림 — 사용자가 부르지 않았으면 침묵.
+   (단, 컨텍스트에 "📍 현재 대화 흐름: 아직 응답 안 함"이 명시된 경우는 응답)
 
 예시:
 - 사용자 "네모야" → speak("응?")
 - 사용자 "네모 안녕" → speak("어, 안녕!")
-- 사용자 "지금 뭐 해" → speak("그냥 너 보고 있었어.")
-- 사용자 "졸려" → speak("좀 쉬어.")
-- 사용자 "고마워" → speak("음, 뭘 또.")
+- 사용자 (호명 후 30초 안) "오늘 점심 뭐 먹지" → speak("음, 뭘 먹고 싶어?")
+- 사용자 (호명 없이) "졸려..." → **do_nothing** (부르지 않음)
+- 사용자 (호명 없이) "내일 회의 있어" → **do_nothing**
 
 
 
@@ -1123,22 +1128,35 @@ class RobotAgent:
             and getattr(self.perception, "last_user_speech_at", 0) > 0
             and now - self.perception.last_user_speech_at < 8.0
         )
-        # 호명("네모", "네모야") 들으면 cooldown 무조건 bypass + quiet hours 무시.
-        # user_recent_speech보다 강한 신호 — 사용자가 명시적으로 부른 것.
-        user_recently_called = (
-            self.perception is not None
-            and getattr(self.perception, "last_user_called_at", 0) > 0
-            and now - self.perception.last_user_called_at < 15.0
+        # 호명("네모", "네모야") 후 60초 동안 "대화 활성" — 그 안엔 호명 없는
+        # 추가 발화도 응답 OK (자연 대화 흐름). 60초 지나면 다시 침묵 모드.
+        called_at = (
+            getattr(self.perception, "last_user_called_at", 0)
+            if self.perception is not None else 0
         )
+        user_recently_called = called_at > 0 and (now - called_at) < 60.0
+        # 가장 강한 신호 — 방금(15s) 직접 호명. cooldown/quiet hours/대화 무관 우선.
+        user_just_called = called_at > 0 and (now - called_at) < 15.0
+
+        # 🚨 hard gate — 호명 없으면 사용자 발화에 응답 X.
+        # 사용자가 일상 대화 ("점심 뭐 먹지") 하는데 네모가 다 끼어드는 거 거슬림.
+        # 호명한 발화 또는 호명 후 60s 윈도우 안일 때만 사용자 발화 응답 허용.
+        # proactive(주기적 tick, 사용자 발화 X)는 이 가드 안 걸림 — cooldown만 적용.
+        if user_recent_speech and not user_recently_called:
+            log.info(
+                f"_do_speak skip: 호명 없는 사용자 발화 — 응답 차단 "
+                f"(text='{text[:30]}...')"
+            )
+            return
+
         gap = now - self._last_speak_at
-        if (not user_recent_speech
-                and not user_recently_called
+        if (not user_just_called
                 and gap < BEHAVIOR.agent_speak_min_gap_sec):
             log.info(
                 f"_do_speak skip: cooldown {gap:.0f}s < "
                 f"{BEHAVIOR.agent_speak_min_gap_sec:.0f}s "
                 f"(text='{text[:30]}...', user_recent={user_recent_speech}, "
-                f"called={user_recently_called})"
+                f"called={user_recently_called}, just_called={user_just_called})"
             )
             return
         self._last_speak_at = now
