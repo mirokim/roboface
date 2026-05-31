@@ -67,6 +67,10 @@ _WEATHER_TRIGGERS = (
     "날씨알려", "날씨어때", "날씨가어때", "날씨좀",
     "오늘날씨", "지금날씨", "weather",
 )
+# 내일 forecast — "내일" 단어 자체가 날씨 문맥 외엔 잘 안 쓰여 단순 substring OK
+_TOMORROW_WEATHER_TRIGGERS = (
+    "내일날씨", "내일은날씨", "내일기온", "내일은어때",
+)
 # 같은 질문 빠른 반복 막음 — 짧게 (캐시라 cost 없지만 LCD 깜빡 방지)
 _WEATHER_COOLDOWN_SEC = 5.0
 
@@ -174,7 +178,20 @@ class VoiceCommandHandler:
             )
             return True
 
-        # 4) 날씨 알려줘 — WeatherClient.snapshot() LCD 표시
+        # 4) 내일 날씨 — forecast endpoint (현재 weather보다 먼저 체크: specific 우선)
+        if any(t in normalized for t in _TOMORROW_WEATHER_TRIGGERS):
+            last = self._last_triggered_at.get("weather_tomorrow", 0.0)
+            if now - last < _WEATHER_COOLDOWN_SEC:
+                log.info(
+                    f"내일 날씨 cooldown ({now - last:.0f}s < {_WEATHER_COOLDOWN_SEC})"
+                )
+                return True
+            self._last_triggered_at["weather_tomorrow"] = now
+            log.info(f'🌤 내일 날씨 요청 — text="{text}"')
+            await self._announce_tomorrow_weather()
+            return True
+
+        # 5) 오늘/현재 날씨 — WeatherClient.snapshot() LCD 표시
         if any(t in normalized for t in _WEATHER_TRIGGERS):
             last = self._last_triggered_at.get("weather", 0.0)
             if now - last < _WEATHER_COOLDOWN_SEC:
@@ -239,6 +256,26 @@ class VoiceCommandHandler:
             log.info("weather snapshot None — OPENWEATHER_API_KEY 미설정")
             self.face.apply_expression(expr.WORRIED)
             self.face.show_speech("날씨 정보 없음 (API 키 X)", 3.0)
+            return
+        line = snap.one_liner()
+        log.info(f"🌤 {line}")
+        self.face.apply_expression(expr.CONTENT)
+        self.face.show_speech(line, 8.0)
+
+    async def _announce_tomorrow_weather(self) -> None:
+        """내일 날씨 LCD에 8초 표시. 1시간 캐시 + 5일 forecast endpoint."""
+        try:
+            from src.integrations.weather import get_client
+            snap = await get_client().forecast_for_tomorrow()
+        except Exception as e:
+            log.warning(f"tomorrow forecast 실패: {e}")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech("내일 날씨 가져오기 실패", 3.0)
+            return
+        if snap is None:
+            log.info("tomorrow forecast None — 키 없거나 fetch 실패")
+            self.face.apply_expression(expr.WORRIED)
+            self.face.show_speech("내일 날씨 정보 없음", 3.0)
             return
         line = snap.one_liner()
         log.info(f"🌤 {line}")

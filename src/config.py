@@ -218,6 +218,8 @@ class BehaviorConfig:
     # 1800s(30min): 무료 tier 1M calls/month 한참 안 깸 + 날씨 변화엔 충분히 빠름.
     weather_cache_sec: float = 1800.0
     weather_http_timeout_sec: float = 5.0
+    # forecast(내일 등)는 변화 더 느림 → 1시간 캐시. 같은 endpoint 다른 데이터.
+    weather_forecast_cache_sec: float = 3600.0
 
 
 BEHAVIOR = BehaviorConfig()

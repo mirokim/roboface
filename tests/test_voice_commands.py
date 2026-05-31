@@ -385,6 +385,90 @@ def test_weather_cooldown_blocks_rapid_repeat():
     assert call_count["n"] == 1
 
 
+# ─── 내일 날씨 ───
+
+def test_tomorrow_weather_uses_forecast_endpoint():
+    """'내일 날씨 알려줘' → forecast_for_tomorrow() 호출, 현재 snapshot() 호출 X."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+
+    snap = _weather_snap("내일 분당 흐림 19~29°C · 비올 확률 60%")
+    calls = {"snapshot": 0, "forecast": 0}
+
+    async def fake_snapshot():
+        calls["snapshot"] += 1
+        return _weather_snap("(should not be called)")
+
+    async def fake_forecast():
+        calls["forecast"] += 1
+        return snap
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {
+            "snapshot": staticmethod(fake_snapshot),
+            "forecast_for_tomorrow": staticmethod(fake_forecast),
+        }),
+    ):
+        r = asyncio.run(handler("내일 날씨 알려줘"))
+
+    assert r is True
+    assert calls["forecast"] == 1
+    assert calls["snapshot"] == 0   # 오늘 X
+    assert face.expression_name == "content"
+    texts = [c[0] for c in face.speech_calls]
+    assert any("내일" in t and "분당" in t for t in texts)
+
+
+def test_tomorrow_weather_no_data_worried():
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+
+    async def fake_forecast():
+        return None
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {
+            "forecast_for_tomorrow": staticmethod(fake_forecast),
+        }),
+    ):
+        r = asyncio.run(handler("내일 날씨"))
+
+    assert r is True
+    assert face.expression_name == "worried"
+    texts = [c[0] for c in face.speech_calls]
+    assert any("정보 없음" in t or "내일" in t for t in texts)
+
+
+def test_tomorrow_takes_precedence_over_today():
+    """'내일 날씨'에 '날씨'도 포함되지만 '내일' 분기가 먼저 — forecast만 호출."""
+    face = _FaceStub()
+    handler = VoiceCommandHandler(face)
+
+    calls = {"snapshot": 0, "forecast": 0}
+
+    async def fake_snapshot():
+        calls["snapshot"] += 1
+        return _weather_snap("today")
+
+    async def fake_forecast():
+        calls["forecast"] += 1
+        return _weather_snap("tomorrow")
+
+    with patch(
+        "src.integrations.weather.get_client",
+        return_value=type("C", (), {
+            "snapshot": staticmethod(fake_snapshot),
+            "forecast_for_tomorrow": staticmethod(fake_forecast),
+        }),
+    ):
+        asyncio.run(handler("내일 날씨 어때"))
+
+    assert calls["forecast"] == 1
+    assert calls["snapshot"] == 0
+
+
 def test_cooldown_blocks_second_trigger_within_30s():
     face = _FaceStub()
     handler = VoiceCommandHandler(face)
