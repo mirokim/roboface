@@ -45,11 +45,18 @@ class AudioReactive:
     # asyncio.run loop 안에 있으므로 동일 loop). 그래서 직접 task 만들어도 OK.
 
     def _on_clap(self) -> None:
+        # 콜백 진입 자체 로깅 — "왜 반응 없지" 진단 시 audio_monitor는 박수 잡았는데
+        # 표정 변화가 없는 케이스(state 차단/덮어쓰기 등) 명확히 구분.
+        log.info(f"👏 박수 콜백 발동 (state={self.ctx.state.value})")
         # 대화 중엔 양보
         if self.ctx.state in (State.TALKING, State.LISTENING):
+            log.info(f"  → state={self.ctx.state.value}, 박수 무시")
             return
-        # 표정만 — 끄덕 모션 제거 (시끄러우면 산만)
-        flash_expression(self.face, expr.SURPRISED, 0.5)
+        # 표정만 — 끄덕 모션 제거 (시끄러우면 산만).
+        # 0.5초는 LCD 안 보고 있으면 못 알아챔 → 1.5초로 늘림. 박수 N번 치면
+        # 같은 표정으로 그 사이 계속 유지(flash_expression이 새 발동마다 교체).
+        flash_expression(self.face, expr.SURPRISED, 1.5)
+        log.info(f"  → SURPRISED flash 1.5s (이전 표정={self.face.expression.name})")
 
     def _on_music_start(self, bpm: float) -> None:
         if self.ctx.state in (State.TALKING, State.LISTENING):

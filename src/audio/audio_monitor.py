@@ -29,22 +29,33 @@ MusicHandler = Callable[[float], None]  # BPM
 StopHandler = Callable[[], None]
 
 
-def _frame_rms(pcm: bytes) -> float:
-    """30ms int16 PCM → RMS (0~32768)."""
+def _frame_rms_and_peak(pcm: bytes) -> tuple[float, float]:
+    """30ms int16 PCM → (RMS, peak abs). 둘 다 0~32768.
+
+    박수처럼 짧은 transient(~10ms)는 30ms RMS 평균에 희석돼 약하게 잡힘 —
+    peak abs를 따로 봐서 transient에 robust. RMS는 baseline(EMA) 추적용.
+    """
     if len(pcm) < 2:
-        return 0.0
-    # 빠른 수동 계산 (numpy 미설치 환경 대응)
+        return 0.0, 0.0
     n = len(pcm) // 2
     acc = 0
+    peak = 0
     for i in range(0, len(pcm), 2):
-        # little-endian int16
         lo = pcm[i]
         hi = pcm[i + 1]
         v = (hi << 8) | lo
         if v >= 0x8000:
             v -= 0x10000
         acc += v * v
-    return math.sqrt(acc / n)
+        av = -v if v < 0 else v
+        if av > peak:
+            peak = av
+    return math.sqrt(acc / n), float(peak)
+
+
+def _frame_rms(pcm: bytes) -> float:
+    """하위 호환 — 기존 호출자/테스트 위해 RMS만 반환."""
+    return _frame_rms_and_peak(pcm)[0]
 
 
 class AudioMonitor:
@@ -65,9 +76,16 @@ class AudioMonitor:
         on_clap: ClapHandler | None = None,
         on_music_start: MusicHandler | None = None,
         on_music_stop: StopHandler | None = None,
-        clap_ratio: float = 4.0,
-        clap_absolute_min: float = 800.0,
-        clap_cooldown_sec: float = 0.4,
+        # 약한 마이크 + transient 박수도 잡히게 완화 (RMS + peak 두 갈래).
+        # RMS는 baseline 대비 ratio 비교 — 환경 노이즈 적응형
+        # peak는 절대 임계 — transient(짧고 강한) 신호 보호 (박수는 ~10ms peak)
+        # 둘 중 하나라도 만족하면 onset.
+        clap_ratio: float = 3.0,
+        clap_absolute_min: float = 350.0,    # RMS 임계 (낮춤 — 약한 박수 cover)
+        clap_peak_min: float = 3000.0,       # peak 임계 — transient 단독 트리거
+        # 0.4 → 0.25 — 두 번 빠르게 친 박수(보통 200~400ms 간격)도 두 번 다
+        # 발동하도록. _refractory_until(80ms)이 echo 방지 따로 처리.
+        clap_cooldown_sec: float = 0.25,
         music_window_sec: float = 5.0,
         music_min_onsets: int = 8,
         music_bpm_range: tuple[float, float] = (60.0, 160.0),
@@ -80,6 +98,7 @@ class AudioMonitor:
 
         self.clap_ratio = clap_ratio
         self.clap_absolute_min = clap_absolute_min
+        self.clap_peak_min = clap_peak_min
         self.clap_cooldown_sec = clap_cooldown_sec
         self.music_window_sec = music_window_sec
         self.music_min_onsets = music_min_onsets
@@ -100,12 +119,23 @@ class AudioMonitor:
     def stop(self) -> None:
         self._stop.set()
 
-    def _detect_onset(self, rms: float, now: float) -> bool:
-        """현재 frame이 onset인지 판단 + baseline 갱신."""
+    def _detect_onset(self, rms: float, now: float, peak: float = 0.0) -> bool:
+        """현재 frame이 onset인지 판단 + baseline 갱신.
+
+        두 갈래 onset 조건 (둘 중 하나라도):
+          (A) RMS ratio: rms ≥ clap_absolute_min AND rms / baseline ≥ clap_ratio
+              → 환경 적응형 — 평소 조용한 방에서 살짝만 spike도 잡음
+          (B) Peak transient: peak ≥ clap_peak_min
+              → 박수처럼 짧고 강한 transient는 30ms RMS에 희석돼도 peak는 큼
+        """
         ratio = rms / max(1.0, self._baseline)
-        is_onset = (
+        rms_onset = (
             rms >= self.clap_absolute_min
             and ratio >= self.clap_ratio
+        )
+        peak_onset = peak >= self.clap_peak_min
+        is_onset = (
+            (rms_onset or peak_onset)
             and now >= self._refractory_until
         )
         # baseline은 onset 아닐 때만 갱신 (spike가 baseline 끌어올리지 않게)
@@ -169,39 +199,72 @@ class AudioMonitor:
         조건: 직전 1초에 onset 1~2개만 (음악이면 더 많이 옴).
         """
         if self._music_playing:
+            log.debug("onset 발생했지만 music_playing — 박수 분류 skip")
             return
         if now - self._last_clap_at < self.clap_cooldown_sec:
+            log.debug(
+                f"onset 발생했지만 cooldown 안 — 박수 skip "
+                f"({now - self._last_clap_at:.2f}s < {self.clap_cooldown_sec})"
+            )
             return
         recent = [t for t in self._onsets if now - t < 1.0]
         if len(recent) <= 2:
             # 박수 — 단발성 큰 소리
             self._last_clap_at = now
-            log.info("👏 박수 감지")
+            log.info(f"👏 박수 감지 (직전 1초 onset {len(recent)}개, baseline≈{self._baseline:.0f})")
             if self.on_clap:
                 try:
                     self.on_clap()
                 except Exception as e:
                     log.warning(f"on_clap 핸들러 에러: {e}")
+        else:
+            log.debug(f"onset {len(recent)}개 — 박수 아닌 패턴 (음악 후보)")
 
     async def run(self) -> None:
         """blocking loop — mic에서 frame을 받아 처리."""
-        log.info("audio_monitor 시작")
+        log.info(
+            f"audio_monitor 시작 (rms_min={self.clap_absolute_min}, "
+            f"rms_ratio={self.clap_ratio}, peak_min={self.clap_peak_min}, "
+            f"cooldown={self.clap_cooldown_sec}s)"
+        )
         q = self.mic.add_subscriber()
         frame_count = 0
+        rms_peak_window = 0.0    # 최근 5초 max RMS — baseline 위 수준 보기
+        abs_peak_window = 0.0    # 최근 5초 max abs(sample) — transient 감지 진단
         try:
             while not self._stop.is_set():
                 frame = await pop_frame(q, timeout=1.0)
                 if frame is None or len(frame) != FRAME_SAMPLES * BYTES_PER_SAMPLE:
                     continue
-                rms = _frame_rms(frame)
+                rms, peak = _frame_rms_and_peak(frame)
                 now = time.monotonic()
-                if self._detect_onset(rms, now):
+                rms_peak_window = max(rms_peak_window, rms)
+                abs_peak_window = max(abs_peak_window, peak)
+                if self._detect_onset(rms, now, peak=peak):
+                    # 모든 onset 로그 — RMS/peak 어느 갈래로 잡혔는지
+                    log.info(
+                        f"onset: rms={rms:.0f} peak={peak:.0f} "
+                        f"baseline={self._baseline:.0f} "
+                        f"ratio={rms / max(1.0, self._baseline):.1f}"
+                    )
                     self._onsets.append(now)
                     self._maybe_clap(now)
-                # 매 ~0.5초 (16 frame × 30ms) music 상태 평가 (silence 동안에도 호출)
                 frame_count += 1
+                # 매 ~0.5초 (16 frame × 30ms) music 상태 평가 (silence 동안에도 호출)
                 if frame_count % 16 == 0:
                     self._check_music(now)
+                # 매 ~5초 baseline + peak 로그 — 평소 마이크 신호 수준 확인.
+                # 박수가 안 잡히는 진단:
+                #   abs_peak < clap_peak_min(3000) 이면 마이크 신호 약해 transient
+                #   감지도 어려움. 임계 더 낮추거나 OS 게인 올려야.
+                if frame_count % 165 == 0:
+                    log.info(
+                        f"audio_monitor 5s 통계: baseline≈{self._baseline:.0f}, "
+                        f"rms_peak={rms_peak_window:.0f}/{self.clap_absolute_min:.0f}, "
+                        f"abs_peak={abs_peak_window:.0f}/{self.clap_peak_min:.0f}"
+                    )
+                    rms_peak_window = 0.0
+                    abs_peak_window = 0.0
         finally:
             self.mic.remove_subscriber(q)
             log.info("audio_monitor 종료")

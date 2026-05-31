@@ -127,9 +127,11 @@ class Microphone:
             mono = arr.mean(axis=1).astype(np.float32)
         else:
             mono = arr[:, 0].astype(np.float32)
-        # rate convert (linear interp)
+        # rate convert (linear interp). round() — int() 절단 시 odd rate(22050 등)
+        # 에서 출력 샘플 수가 FRAME_SAMPLES(480)보다 1 작아져 VAD가 size mismatch로
+        # 모든 프레임 silently drop.
         if self._native_rate != self.sample_rate:
-            n_out = int(len(mono) * self.sample_rate / self._native_rate)
+            n_out = int(round(len(mono) * self.sample_rate / self._native_rate))
             if n_out <= 1:
                 return b""
             x_in = np.linspace(0, 1, len(mono), endpoint=False)
@@ -224,6 +226,12 @@ class VADRecorder:
     - silence_ms 만큼 무음이 연속이면 발화 끝으로 간주
     - max_sec 초과시 강제 종료
     - 30프레임(0.9s) 안에 발화 시작 안 하면 None
+
+    콜백 (시각 피드백용):
+    - on_speech_start: VAD가 발화 시작 감지한 직후 (한 번)
+    - on_speech_end: 발화 끝 (silence 감지 또는 max_sec). 시작 후에만 호출.
+    - 콜백은 sync 함수 — face.recording = True/False 같은 즉시 상태 변경용.
+      예외는 swallow (시각 피드백 실패가 녹음 자체 끊으면 안 됨).
     """
 
     def __init__(
@@ -232,12 +240,24 @@ class VADRecorder:
         aggressiveness: int = 2,
         silence_ms: int = 700,
         start_timeout_sec: float = 5.0,
+        on_speech_start: "callable | None" = None,
+        on_speech_end: "callable | None" = None,
     ) -> None:
         _, webrtcvad = _load_backends()
         self.mic = mic
         self.vad = webrtcvad.Vad(aggressiveness)
         self.silence_frames = silence_ms // FRAME_MS
         self.start_timeout_frames = int(start_timeout_sec * 1000 // FRAME_MS)
+        self.on_speech_start = on_speech_start
+        self.on_speech_end = on_speech_end
+
+    def _fire(self, cb) -> None:
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception as e:
+            log.debug(f"VADRecorder 콜백 에러 (무시): {e}")
 
     async def record_utterance(self, max_sec: float = 10.0) -> bytes | None:
         max_frames = int(max_sec * 1000 // FRAME_MS)
@@ -247,41 +267,48 @@ class VADRecorder:
         silent_count = 0
         idle_count = 0
 
-        for _ in range(max_frames):
-            frame = await self.mic.frame(timeout=1.0)
-            if frame is None or len(frame) != FRAME_SAMPLES * BYTES_PER_SAMPLE:
-                idle_count += 1
-                if not started and idle_count > self.start_timeout_frames:
-                    return None
-                continue
-
-            is_speech = self.vad.is_speech(frame, self.mic.sample_rate)
-
-            if not started:
-                ring.append(frame)
-                if is_speech:
-                    started = True
-                    recorded.extend(ring)
-                    log.debug("발화 시작 감지")
-                else:
+        try:
+            for _ in range(max_frames):
+                frame = await self.mic.frame(timeout=1.0)
+                if frame is None or len(frame) != FRAME_SAMPLES * BYTES_PER_SAMPLE:
                     idle_count += 1
-                    if idle_count > self.start_timeout_frames:
+                    if not started and idle_count > self.start_timeout_frames:
                         return None
-            else:
-                recorded.append(frame)
-                if is_speech:
-                    silent_count = 0
+                    continue
+
+                is_speech = self.vad.is_speech(frame, self.mic.sample_rate)
+
+                if not started:
+                    ring.append(frame)
+                    if is_speech:
+                        started = True
+                        recorded.extend(ring)
+                        log.debug("발화 시작 감지")
+                        self._fire(self.on_speech_start)
+                    else:
+                        idle_count += 1
+                        if idle_count > self.start_timeout_frames:
+                            return None
                 else:
-                    silent_count += 1
-                    if silent_count >= self.silence_frames:
-                        log.debug("발화 끝 감지")
-                        break
+                    recorded.append(frame)
+                    if is_speech:
+                        silent_count = 0
+                    else:
+                        silent_count += 1
+                        if silent_count >= self.silence_frames:
+                            log.debug("발화 끝 감지")
+                            break
 
-        if not started or not recorded:
-            return None
+            if not started or not recorded:
+                return None
 
-        pcm = b"".join(recorded)
-        return _pcm_to_wav(pcm, self.mic.sample_rate)
+            pcm = b"".join(recorded)
+            return _pcm_to_wav(pcm, self.mic.sample_rate)
+        finally:
+            # 시작했으면 무조건 end 발동 — max_sec/silence/exception 모두 cover.
+            # face.recording 같은 indicator가 stuck on 되는 거 방지.
+            if started:
+                self._fire(self.on_speech_end)
 
 
 def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:

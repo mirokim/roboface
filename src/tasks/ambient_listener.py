@@ -129,13 +129,27 @@ class WhisperVADStreamer:
     - perception.user_present False면 record skip (사람 없는데 STT X)
     - 너무 짧은 텍스트(2자 이하) 또는 너무 긴 utterance 제외
     - VADRecorder가 start_timeout 안에 발화 없으면 None 반환 — 그냥 다음 라운드
+
+    시각 피드백 (face 주입 시):
+    - VAD 발화 감지 → face.recording = True (LCD 우상단 빨간 dot 깜빡)
+    - 발화 끝 → face.recording = False
+    - STT 결과 도착(hallucination 아님) → face.show_speech("🎤 ...") echo
+      → 사용자가 자기 말이 어떻게 들렸는지 즉시 확인. STT 정확도 검증용.
     """
+
+    # echo 말풍선 노출 시간 — show_speech의 min_speech_display_sec이 더 길면
+    # 그쪽이 우선. 너무 짧으면 사용자가 못 읽음.
+    ECHO_DURATION_SEC = 2.5
+    # echo prefix — agent 발화/시스템 멘트와 구분. strip_emoji가 🎤 제거 가능
+    # 하니 화살표(←)로 받음 표시.
+    ECHO_PREFIX = "← "
 
     def __init__(
         self,
         mic: Any,
         stt: Any,
         perception: Any | None = None,
+        face: Any | None = None,
         max_sec: float = 15.0,
         silence_ms: int = 700,
         aggressiveness: int = 2,
@@ -144,12 +158,32 @@ class WhisperVADStreamer:
         self.mic = mic
         self.stt = stt
         self.perception = perception
+        self.face = face
         self.recorder = VADRecorder(
             mic, aggressiveness=aggressiveness,
             silence_ms=silence_ms,
             start_timeout_sec=2.0,  # 짧게 — 사람 없으면 빨리 빠져나와 가드 재체크
+            on_speech_start=self._on_speech_start,
+            on_speech_end=self._on_speech_end,
         )
         self.max_sec = max_sec
+
+    def _on_speech_start(self) -> None:
+        if self.face is not None:
+            self.face.recording = True
+
+    def _on_speech_end(self) -> None:
+        if self.face is not None:
+            self.face.recording = False
+
+    def _echo_transcript(self, text: str) -> None:
+        """STT 결과를 face 말풍선에 짧게 echo. 사용자가 자기 말 인식 확인."""
+        if self.face is None:
+            return
+        try:
+            self.face.show_speech(self.ECHO_PREFIX + text, self.ECHO_DURATION_SEC)
+        except Exception as e:
+            log.debug(f"echo 표시 실패 (무시): {e}")
 
     def _user_present(self) -> bool:
         if self.perception is None:
@@ -196,6 +230,9 @@ class WhisperVADStreamer:
             if _is_hallucination(text):
                 log.info(f'hallucination drop: "{text}"')
                 continue
+            # 시각 echo — 사용자가 자기 말이 어떻게 들렸는지 즉시 확인.
+            # agent가 응답 결정하기 전에 보여서 STT 동작 자체에 대한 피드백.
+            self._echo_transcript(text)
             yield text
 
 

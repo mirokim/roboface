@@ -84,7 +84,9 @@ async def run_simulator() -> None:
 
     work_tracker = WorkTracker()
     posture = PostureMonitor()
-    ambient = AmbientListener()
+    # simulator는 mic 없으니 MockSTT — 가짜 발화로 schedule_extractor/agent 흐름 확인용
+    from src.tasks.ambient_listener import MockSTT
+    ambient = AmbientListener(stt=MockSTT())
     ambient.add_handler(schedule_extractor.handle_transcript)
     ambient.add_handler(journal_writer.handle_transcript)
 

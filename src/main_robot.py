@@ -116,7 +116,7 @@ async def run_robot() -> None:
             from src.tasks.ambient_listener import WhisperVADStreamer
             stt = create_stt()  # STT_BACKEND env로 선택 — 기본 auto(local 우선)
             streamer = WhisperVADStreamer(
-                shared_mic, stt, perception=perception,
+                shared_mic, stt, perception=perception, face=face,
             )
             ambient = AmbientListener(stt=streamer, perception=perception)
             ambient.add_handler(schedule_extractor.handle_transcript)
