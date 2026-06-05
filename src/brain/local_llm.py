@@ -31,8 +31,10 @@ LOCAL_MODEL_PATH = Path(
             / "qwen2.5-3b-instruct-q4_k_m.gguf"),
     )
 )
-# 컨텍스트 길이 — agent prompt + tools + history가 들어가야. 4096이면 충분.
-LOCAL_N_CTX = int(os.getenv("LOCAL_N_CTX", "4096"))
+# 컨텍스트 길이 — _AGENT_SYSTEM(6842자, ~3500 tok) + tools schema + user
+# = ~5500 tok 가뿐히 넘김. 4096 → 8192로 늘려야 안 잘림.
+# Qwen2.5는 32k까지 학습. KV cache RAM 부담 +300MB 정도 (Pi5 RAM 여유 있음).
+LOCAL_N_CTX = int(os.getenv("LOCAL_N_CTX", "8192"))
 # 쓰레드 수 — Pi5는 4 core. 카메라/STT랑 양보해 3 권장.
 LOCAL_N_THREADS = int(os.getenv("LOCAL_N_THREADS", "3"))
 
@@ -303,9 +305,35 @@ class LocalLLMClient:
                 )
                 dt = time.time() - t0
             actions, assistant_blocks = _openai_response_to_actions(resp)
-            log.debug(
-                f"로컬 LLM 추론 {dt:.1f}s → actions={[a['name'] for a in actions]}"
-            )
+            if not actions:
+                # tool 호출 없이 raw text 답한 케이스 — speak로 변환 fallback.
+                # 작은 로컬 모델은 가끔 tool_choice=auto에서 그냥 답함.
+                raw_text = ""
+                choice = (resp.get("choices") or [{}])[0]
+                msg = choice.get("message", {}) or {}
+                raw_text = (msg.get("content") or "").strip()
+                log.info(
+                    f"로컬 LLM 추론 {dt:.1f}s, tool 호출 X → "
+                    f"raw='{raw_text[:60]}' (speak fallback)"
+                )
+                if raw_text:
+                    fallback_id = f"call_fallback_{int(time.time())}"
+                    actions = [{
+                        "id": fallback_id,
+                        "name": "speak",
+                        "input": {"text": raw_text},
+                    }]
+                    assistant_blocks = [{
+                        "type": "tool_use",
+                        "id": fallback_id,
+                        "name": "speak",
+                        "input": {"text": raw_text},
+                    }]
+            else:
+                log.info(
+                    f"로컬 LLM 추론 {dt:.1f}s → "
+                    f"actions={[a['name'] for a in actions]}"
+                )
             full_messages = list(messages) + [
                 {"role": "assistant", "content": assistant_blocks}
             ]
