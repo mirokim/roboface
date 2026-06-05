@@ -226,6 +226,13 @@ class _ClaudeClient:
                 }]
             else:
                 messages = [{"role": "user", "content": user_prompt}]
+        # tools 배열 끝에 cache_control 한 번만 — 직전 모든 tool definition이
+        # 캐시 prefix에 포함됨. system 블록까지 합쳐 ~수k 토큰이 캐시 hit.
+        cached_tools = list(tools)
+        if cached_tools:
+            last = dict(cached_tools[-1])
+            last["cache_control"] = {"type": "ephemeral"}
+            cached_tools[-1] = last
         try:
             response = client.messages.create(
                 model=model,
@@ -237,7 +244,7 @@ class _ClaudeClient:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                tools=tools,
+                tools=cached_tools,
                 messages=messages,
             )
             _usage.record(

@@ -109,9 +109,11 @@ WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비
 
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-# Haiku 4.5는 가끔 tool input 누락(speak를 빈 {}로 호출) → 사용자 발화에 응답
-# 못 함. Sonnet 4.6은 tool calling 안정. 비용 입력토큰 ~5x이지만 응답 누락 0.
-CLAUDE_MODEL = "claude-sonnet-4-6"          # agent 자율 결정 (tool calling 안정성)
+# 모델 분리: idle 점검(do_nothing 위주)엔 Haiku, 사용자 발화/호명 직후엔 Sonnet.
+# Haiku 4.5의 speak 빈 input 버그는 agent._do_speak가 empty text skip으로 가드.
+# 사용자 응답 누락 위험은 Sonnet 사용 윈도우에서 0.
+CLAUDE_MODEL = "claude-sonnet-4-6"          # 사용자 발화/호명 직후 — 응답 보장
+CLAUDE_MODEL_LIGHT = "claude-haiku-4-5"     # idle tick — 대부분 do_nothing
 CLAUDE_MODEL_HEAVY = "claude-sonnet-4-6"    # 일정 추출 등 정밀 작업
 
 # === ThinkTank 통합 ===
@@ -173,9 +175,9 @@ class BehaviorConfig:
     idle_screen_dim_after_sec: int = 300    # 5분 부재
     idle_screen_off_after_sec: int = 1800   # 30분 부재
 
-    # 에이전트 결정 주기 — 15→30. anchor 룰 도입으로 어차피 4-5번에 1번만 speak.
-    # tick 자체를 줄여 신호 없는 결정 빈도 감소 + 비용 절감.
-    agent_interval_sec: float = 30.0        # Claude 결정 주기
+    # 에이전트 결정 주기 — 30→60. 신호 변화(표정/시선/발화 등)는 별도
+    # 변화 트리거로 즉시 응답하므로 base는 idle 점검용. 토큰 비용 ½.
+    agent_interval_sec: float = 60.0        # Claude 결정 주기 (idle 점검)
     agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
     agent_dance_min_gap_sec: float = 120.0  # 에이전트 dance 사이 최소 간격 (격렬 방지)
 
@@ -186,8 +188,8 @@ class BehaviorConfig:
     #   3) 활동성 또는 시선 타깃 전이
     #   4) PRESENCE_NEW 직후 (사람 새로 등장)
     agent_vision_enabled: bool = True
-    agent_vision_min_interval_sec: float = 30.0    # 60→30. 시각 단서 더 자주 확보
-    agent_vision_max_interval_sec: float = 300.0   # 600→300. 5분에 한 번은 무조건 첨부
+    agent_vision_min_interval_sec: float = 90.0    # 30→90. 비용 절감 (이미지 input가 가장 비쌈)
+    agent_vision_max_interval_sec: float = 600.0   # 300→600. 10분에 한 번은 무조건 첨부
     agent_vision_jpeg_quality: int = 70            # 0~100. 70이면 320×240 ~10KB
     agent_vision_max_side_px: int = 480            # 큰 frame은 다운샘플 (비용 절감)
 

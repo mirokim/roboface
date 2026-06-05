@@ -26,7 +26,14 @@ from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
-from src.config import AMBIENT_LISTEN, ANTHROPIC_API_KEY, BEHAVIOR, OPENAI_API_KEY
+from src.config import (
+    AMBIENT_LISTEN,
+    ANTHROPIC_API_KEY,
+    BEHAVIOR,
+    CLAUDE_MODEL,
+    CLAUDE_MODEL_LIGHT,
+    OPENAI_API_KEY,
+)
 
 # mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
 AMBIENT_LISTEN_ACTIVE = AMBIENT_LISTEN and bool(OPENAI_API_KEY)
@@ -825,6 +832,54 @@ class RobotAgent:
                 return True
         return False
 
+    def _should_idle_skip(self) -> bool:
+        """Base interval tick 도달 시 Claude 호출 정당화 휴리스틱.
+
+        변화 트리거 tick은 이 함수가 호출되지 않음 — 이미 의미 있는 신호 변화.
+        base interval tick은 "사용자 조용 + 신호 정적"에서 도달하는 경우라
+        대부분 Claude가 do_nothing() 결정. 그 호출 자체를 코드로 skip해 비용 0.
+
+        호출 정당화 (OR — 하나라도 충족하면 호출):
+        1. 사용자 발화 최근 60s
+        2. 사용자 호명 최근 60s
+        3. 새 등장 후 아직 인사 안 함
+        4. 마지막 agent 발화로부터 chitchat_min(240s) 경과 — 잡담 기회
+        5. 작업 임계 통과 직후 (±60s window)
+        모두 미충족 → idle skip (코드가 do_nothing 결정).
+        """
+        now = time.time()
+        p = self.perception
+        if p is not None:
+            if getattr(p, "last_user_speech_at", 0) > 0 \
+                    and now - p.last_user_speech_at < 60.0:
+                return False
+            if getattr(p, "last_user_called_at", 0) > 0 \
+                    and now - p.last_user_called_at < 60.0:
+                return False
+        if self.ctx.last_user_seen_at \
+                and now - self.ctx.last_user_seen_at < 60.0 \
+                and self._last_speak_at < self.ctx.last_user_seen_at:
+            return False
+        if self._last_speak_at == 0.0 \
+                or now - self._last_speak_at >= BEHAVIOR.chitchat_min_interval_sec:
+            return False
+        if self.get_session_id is not None:
+            try:
+                sid = self.get_session_id()
+                if sid is not None:
+                    work_min = memory.current_work_duration(sid) / 60
+                    for threshold in (
+                        BEHAVIOR.work_break_gentle_minutes,
+                        BEHAVIOR.work_break_warn_minutes,
+                        BEHAVIOR.work_break_strong_minutes,
+                        BEHAVIOR.work_break_alarm_minutes,
+                    ):
+                        if threshold <= work_min < threshold + 1.0:
+                            return False
+            except Exception:
+                pass
+        return True
+
     async def run(self, interval_sec: float | None = None) -> None:
         """Polling 루프 — 2초마다 신호 스냅샷 비교.
 
@@ -854,13 +909,20 @@ class RobotAgent:
             cur_signals = self._snapshot_signals()
             elapsed = now - last_tick_at
             changed = cur_signals != last_signals
-            should_tick = (
-                elapsed >= interval_sec
-                or (changed and elapsed >= trigger_min_gap_sec)
-            )
+            base_due = elapsed >= interval_sec
+            change_due = changed and elapsed >= trigger_min_gap_sec
+            should_tick = base_due or change_due
             if not should_tick:
                 continue
-            if changed and elapsed < interval_sec:
+            # base interval만 도달한 경우(신호 변화 X) — 휴리스틱으로
+            # "Claude 부를 거리 있나" 사전 판단. 없으면 호출 자체 skip.
+            # 변화 트리거 진입은 이미 의미 있는 변화라 그대로 호출.
+            if base_due and not change_due and self._should_idle_skip():
+                log.debug(f"agent tick: idle skip (elapsed={elapsed:.0f}s)")
+                last_tick_at = now
+                last_signals = cur_signals
+                continue
+            if change_due and not base_due:
                 log.info(f"agent tick: 변화 트리거 (elapsed={elapsed:.0f}s)")
             try:
                 await self._tick()
@@ -937,11 +999,28 @@ class RobotAgent:
 
         messages: list[dict] = [{"role": "user", "content": content}]
 
+        # 모델 선택 — 사용자가 최근 15s 안에 발화/호명했으면 Sonnet(응답 보장),
+        # 그 외 idle 점검(대부분 do_nothing)엔 Haiku로 비용 절감.
+        now_for_model = time.time()
+        last_speech = (
+            getattr(self.perception, "last_user_speech_at", 0)
+            if self.perception is not None else 0
+        )
+        last_called = (
+            getattr(self.perception, "last_user_called_at", 0)
+            if self.perception is not None else 0
+        )
+        user_recent = (
+            (last_speech > 0 and now_for_model - last_speech < 15.0)
+            or (last_called > 0 and now_for_model - last_called < 15.0)
+        )
+        tick_model = CLAUDE_MODEL if user_recent else CLAUDE_MODEL_LIGHT
+
         for round_idx in range(_MAX_AGENT_ROUNDS):
             actions, full_messages = await loop.run_in_executor(
                 None,
-                lambda m=messages: conversation._client.generate_with_tools(
-                    "", _TOOLS, messages=m,
+                lambda m=messages, mdl=tick_model: conversation._client.generate_with_tools(
+                    "", _TOOLS, messages=m, model=mdl,
                 ),
             )
             if not actions:
