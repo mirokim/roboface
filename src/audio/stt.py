@@ -139,11 +139,14 @@ class OpenAIWhisperSTT:
         buf = io.BytesIO(wav_bytes)
         buf.name = "utterance.wav"  # OpenAI SDK uses .name for content type
         try:
+            # prompt: 봇 이름 + 흔한 명령어를 hint로 → 짧은 호명/명령 인식률 ↑.
+            # Whisper가 noise를 YouTube outro로 환각하는 빈도도 줄어듦.
             resp = self._client.audio.transcriptions.create(
                 model=self.model,
                 file=buf,
                 language=self.language,
                 response_format="text",
+                prompt="네모야. 안녕 네모. 네모 뭐해. 디버그 모드. 셧다운. 재시작. 날씨 알려줘.",
             )
             text = resp if isinstance(resp, str) else getattr(resp, "text", "")
             text = text.strip()
