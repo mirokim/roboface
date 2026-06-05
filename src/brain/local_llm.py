@@ -23,14 +23,26 @@ from src.utils.logger import get_logger
 log = get_logger("local_llm")
 
 
-# 모델 경로 — 봇 setup에서 받음. 없으면 LocalLLMClient.available()이 False.
-LOCAL_MODEL_PATH = Path(
-    os.getenv(
-        "LOCAL_MODEL_PATH",
-        str(Path(__file__).resolve().parents[2] / "models"
-            / "qwen2.5-3b-instruct-q4_k_m.gguf"),
-    )
-)
+# 모델 경로 — env override 우선, 없으면 models/에서 자동 선택.
+# 우선순위: 1.5B(빠름, Pi5 친화) → 3B(품질 ↑, 느림). hybrid 모드에선 fallback
+# 응답이라 latency 덜 중요 — 1.5B면 충분.
+def _auto_model_path() -> Path:
+    env = os.getenv("LOCAL_MODEL_PATH")
+    if env:
+        return Path(env)
+    models_dir = Path(__file__).resolve().parents[2] / "models"
+    candidates = [
+        "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "qwen2.5-3b-instruct-q4_k_m.gguf",
+    ]
+    for name in candidates:
+        p = models_dir / name
+        if p.exists():
+            return p
+    return models_dir / candidates[0]
+
+
+LOCAL_MODEL_PATH = _auto_model_path()
 # 컨텍스트 길이 — _AGENT_SYSTEM(6842자, ~3500 tok) + tools schema + user
 # = ~5500 tok 가뿐히 넘김. 4096 → 8192로 늘려야 안 잘림.
 # Qwen2.5는 32k까지 학습. KV cache RAM 부담 +300MB 정도 (Pi5 RAM 여유 있음).

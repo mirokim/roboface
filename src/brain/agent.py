@@ -36,8 +36,9 @@ from src.config import (
     OPENAI_API_KEY,
 )
 
-# 로컬 백엔드면 API 키 없어도 agent 동작. 게이트 모두 이 플래그로 통일.
-LLM_AVAILABLE = LLM_BACKEND == "local" or bool(ANTHROPIC_API_KEY)
+# 로컬/hybrid 백엔드면 API 키 없어도 agent 동작 (hybrid는 키 없으면 항상
+# 로컬로 빠짐). 게이트 모두 이 플래그로 통일.
+LLM_AVAILABLE = LLM_BACKEND in ("local", "hybrid") or bool(ANTHROPIC_API_KEY)
 
 # mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
 AMBIENT_LISTEN_ACTIVE = AMBIENT_LISTEN and bool(OPENAI_API_KEY)

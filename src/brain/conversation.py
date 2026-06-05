@@ -197,6 +197,7 @@ class _ClaudeClient:
         system: str = SYSTEM_PROMPT,
         messages: list[dict] | None = None,
         image_b64: str | None = None,
+        raise_offline: bool = False,
     ) -> tuple[list[dict], list[dict]]:
         """tool use 모드 호출.
 
@@ -280,16 +281,145 @@ class _ClaudeClient:
             ]
             return actions, full_messages
         except Exception as e:
+            # 오프라인 감지 — APIConnectionError/APITimeoutError. hybrid 모드에서
+            # 호출자가 로컬 fallback 가능하도록 raise.
+            if raise_offline:
+                try:
+                    from anthropic import (  # type: ignore[import-not-found]
+                        APIConnectionError, APITimeoutError,
+                    )
+                    if isinstance(e, (APIConnectionError, APITimeoutError)):
+                        raise
+                except ImportError:
+                    pass
             log.warning(f"Claude tool 호출 실패: {e}")
             return [], []
 
 
-# 백엔드 선택 — env LLM_BACKEND=local이면 로컬 GGUF, 그 외 Claude.
-# 두 클라이언트는 generate / generate_with_tools 동일 인터페이스라 swap 가능.
+class _HybridClient:
+    """Claude 평소 + 오프라인 감지 시 로컬 LLM fallback.
+
+    매 호출 Claude 먼저 시도. APIConnectionError/APITimeoutError 발생 시
+    로컬로 자동 전환 + offline 캐시 60s (그 동안 Claude 재시도 X, 로컬 직행).
+    캐시 만료 후 다음 호출에서 Claude 재시도. 성공하면 캐시 reset.
+
+    로컬 모델은 lazy load — fallback 첫 호출 시 1회만 메모리 적재.
+    평소엔 RAM 부담 0.
+    """
+
+    _OFFLINE_TTL_SEC = 60.0
+
+    def __init__(self) -> None:
+        self._claude = _ClaudeClient()
+        self._local: Any = None
+        self._offline_until = 0.0
+
+    def _get_local(self) -> Any:
+        if self._local is None:
+            from src.brain.local_llm import get_client as _gl
+            self._local = _gl()
+        return self._local
+
+    def _try_claude_first(self) -> bool:
+        return time.time() >= self._offline_until
+
+    def _mark_offline(self, reason: str) -> None:
+        self._offline_until = time.time() + self._OFFLINE_TTL_SEC
+        log.warning(
+            f"오프라인 감지 → 로컬 LLM fallback ({self._OFFLINE_TTL_SEC:.0f}s): "
+            f"{reason}"
+        )
+
+    def generate(
+        self,
+        user_prompt: str,
+        *,
+        model: str = CLAUDE_MODEL,
+        max_tokens: int = 200,
+        system: str = SYSTEM_PROMPT,
+    ) -> str:
+        if self._try_claude_first():
+            try:
+                client = self._claude._ensure()
+                if client is None:
+                    return self._get_local().generate(
+                        user_prompt, max_tokens=max_tokens, system=system,
+                    )
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=[{
+                        "type": "text", "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                _usage.record(getattr(response, "usage", None))
+                text = "".join(
+                    b.text for b in response.content if b.type == "text"  # type: ignore[attr-defined]
+                )
+                self._offline_until = 0.0
+                return text.strip()
+            except Exception as e:
+                try:
+                    from anthropic import (  # type: ignore[import-not-found]
+                        APIConnectionError, APITimeoutError,
+                    )
+                    if isinstance(e, (APIConnectionError, APITimeoutError)):
+                        self._mark_offline(str(e))
+                    else:
+                        log.warning(f"Claude generate 실패: {e}")
+                        return ""
+                except ImportError:
+                    log.warning(f"Claude generate 실패: {e}")
+                    return ""
+        # 오프라인 모드
+        return self._get_local().generate(
+            user_prompt, max_tokens=max_tokens, system=system,
+        )
+
+    def generate_with_tools(
+        self,
+        user_prompt: str,
+        tools: list[dict],
+        *,
+        model: str = CLAUDE_MODEL,
+        max_tokens: int = 300,
+        system: str = SYSTEM_PROMPT,
+        messages: list[dict] | None = None,
+        image_b64: str | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        if self._try_claude_first():
+            try:
+                result = self._claude.generate_with_tools(
+                    user_prompt, tools,
+                    model=model, max_tokens=max_tokens, system=system,
+                    messages=messages, image_b64=image_b64,
+                    raise_offline=True,
+                )
+                # 성공 (응답 받음, 빈 응답이라도 OK)
+                self._offline_until = 0.0
+                return result
+            except Exception as e:
+                # raise_offline=True라 connection error만 여기 도달
+                self._mark_offline(str(e))
+        # 오프라인 모드 — 로컬 LLM. image는 silently ignored.
+        return self._get_local().generate_with_tools(
+            user_prompt, tools,
+            max_tokens=max_tokens, system=system,
+            messages=messages, image_b64=image_b64,
+        )
+
+
+# 백엔드 선택 — env LLM_BACKEND=local|claude|hybrid.
+# 모두 generate / generate_with_tools 동일 인터페이스라 swap 가능.
 if LLM_BACKEND == "local":
     from src.brain.local_llm import get_client as _get_local_client
     _client = _get_local_client()  # type: ignore[assignment]
     log.info(f"LLM backend: local (Qwen GGUF)")
+elif LLM_BACKEND == "hybrid":
+    _client = _HybridClient()  # type: ignore[assignment]
+    log.info(f"LLM backend: hybrid (Claude + 오프라인 시 로컬 fallback)")
 else:
     _client = _ClaudeClient()
     log.info(f"LLM backend: claude (Anthropic API)")
