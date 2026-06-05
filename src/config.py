@@ -107,6 +107,12 @@ else:
 WEB_UI_PORT = int(os.getenv("WEB_UI_PORT", "8080"))
 WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비활성
 
+# === LLM 백엔드 선택 ===
+# "claude" → Anthropic API (기본, 온라인 필요)
+# "local"  → llama-cpp-python + GGUF 모델 (오프라인, 비용 0)
+# 봇 setup이 모델 다운로드 + .env에 LLM_BACKEND=local 설정.
+LLM_BACKEND = os.getenv("LLM_BACKEND", "claude").lower()
+
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # 모델 분리: idle 점검(do_nothing 위주)엔 Haiku, 사용자 발화/호명 직후엔 Sonnet.

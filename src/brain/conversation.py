@@ -11,7 +11,12 @@ import time
 from datetime import datetime
 from typing import Any
 
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_MODEL_HEAVY
+from src.config import (
+    ANTHROPIC_API_KEY,
+    CLAUDE_MODEL,
+    CLAUDE_MODEL_HEAVY,
+    LLM_BACKEND,
+)
 from src.utils.logger import get_logger
 
 log = get_logger("conversation")
@@ -279,7 +284,15 @@ class _ClaudeClient:
             return [], []
 
 
-_client = _ClaudeClient()
+# 백엔드 선택 — env LLM_BACKEND=local이면 로컬 GGUF, 그 외 Claude.
+# 두 클라이언트는 generate / generate_with_tools 동일 인터페이스라 swap 가능.
+if LLM_BACKEND == "local":
+    from src.brain.local_llm import get_client as _get_local_client
+    _client = _get_local_client()  # type: ignore[assignment]
+    log.info(f"LLM backend: local (Qwen GGUF)")
+else:
+    _client = _ClaudeClient()
+    log.info(f"LLM backend: claude (Anthropic API)")
 
 
 def generate_situational(

@@ -32,8 +32,12 @@ from src.config import (
     BEHAVIOR,
     CLAUDE_MODEL,
     CLAUDE_MODEL_LIGHT,
+    LLM_BACKEND,
     OPENAI_API_KEY,
 )
+
+# 로컬 백엔드면 API 키 없어도 agent 동작. 게이트 모두 이 플래그로 통일.
+LLM_AVAILABLE = LLM_BACKEND == "local" or bool(ANTHROPIC_API_KEY)
 
 # mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
 AMBIENT_LISTEN_ACTIVE = AMBIENT_LISTEN and bool(OPENAI_API_KEY)
@@ -806,7 +810,7 @@ class RobotAgent:
         self._last_speak_text: str | None = None
 
     def _should_skip(self) -> bool:
-        if not ANTHROPIC_API_KEY:
+        if not LLM_AVAILABLE:
             return True
         if self.ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
             return True
@@ -892,10 +896,16 @@ class RobotAgent:
         """
         if interval_sec is None:
             interval_sec = BEHAVIOR.agent_interval_sec
-        if not ANTHROPIC_API_KEY:
-            log.info("agent 비활성 — ANTHROPIC_API_KEY 없음")
+        if not LLM_AVAILABLE:
+            log.info(
+                f"agent 비활성 — LLM backend={LLM_BACKEND}, "
+                f"ANTHROPIC_API_KEY={'O' if ANTHROPIC_API_KEY else 'X'}"
+            )
             return
-        log.info(f"robot agent 시작 (interval={interval_sec}s, change-triggered)")
+        log.info(
+            f"robot agent 시작 (backend={LLM_BACKEND}, "
+            f"interval={interval_sec}s, change-triggered)"
+        )
         poll_sec = 2.0
         trigger_min_gap_sec = 5.0   # 변화 감지 시 최소 cooldown (연속 burst 방지)
         last_tick_at = 0.0
@@ -1077,6 +1087,9 @@ class RobotAgent:
           - 마지막 첨부로부터 min_interval_sec 이상 경과
         """
         if not BEHAVIOR.agent_vision_enabled:
+            return None
+        # 로컬 백엔드(Qwen2.5-3B)는 vision 미지원 — 첨부해도 의미 없음.
+        if LLM_BACKEND == "local":
             return None
         if self.perception is None or self.perception.last_frame is None:
             return None
