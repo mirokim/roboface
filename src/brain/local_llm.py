@@ -31,9 +31,12 @@ def _auto_model_path() -> Path:
     if env:
         return Path(env)
     models_dir = Path(__file__).resolve().parents[2] / "models"
+    # 3B 우선 — 1.5B는 _AGENT_SYSTEM(6842자) 큰 prompt에서 추론 166초+ +
+    # tool 호출 실패. 3B는 cold 30s/warm 6-10s지만 적어도 응답함. fallback
+    # 빈도가 낮으니 latency 좀 길어도 OK.
     candidates = [
-        "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         "qwen2.5-3b-instruct-q4_k_m.gguf",
+        "qwen2.5-1.5b-instruct-q4_k_m.gguf",
     ]
     for name in candidates:
         p = models_dir / name
