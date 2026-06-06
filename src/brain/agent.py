@@ -907,7 +907,9 @@ class RobotAgent:
             f"interval={interval_sec}s, change-triggered)"
         )
         poll_sec = 2.0
-        trigger_min_gap_sec = 5.0   # 변화 감지 시 최소 cooldown (연속 burst 방지)
+        # 변화 감지 시 최소 cooldown — 5→20. 표정/발화 진동으로 인한 burst를
+        # 시간당 최대 ~180회로 제한 (이전 5초는 ~720회까지 허용해 비용 폭증).
+        trigger_min_gap_sec = 20.0
         last_tick_at = 0.0
         last_signals = self._snapshot_signals()
         while True:
@@ -944,19 +946,19 @@ class RobotAgent:
     def _snapshot_signals(self) -> tuple:
         """현재 perception 신호 스냅샷 — 변화 감지(즉시 tick)용.
 
-        **의미 있는 변화만** 포함: 표정 전이 / 사람 수 / 새 발화 / 호명.
-        gaze_target·activity_level·posture_category는 사용자가 가만히 작업만 해도
-        2초 폴링마다 수시로 흔들리는 잡신호 — 이걸로 즉시 tick하면 대부분
-        do_nothing인데 API만 소모(최대 시간당 ~720회)했음. 이런 변화는 base
-        interval(60s) tick + _should_idle_skip이 충분히 처리하므로 제외.
-        None도 의미있는 값으로 취급.
+        **의미 있는 변화만** 포함: 표정 전이 / 새 발화 / 호명.
+        gaze_target·activity_level·posture_category·person_count는 사용자가
+        가만히 작업만 해도 2초 폴링마다 흔들리는 잡신호 — 이걸로 즉시 tick하면
+        대부분 do_nothing인데 API만 소모했음. 특히 person_count는 vision
+        false positive로 1↔2 진동이 잦아 변화 트리거를 6초마다 발동시키던 주범.
+        새 사람 등장은 별도 task가 처리하므로 제외. 이런 변화는 base interval
+        tick + _should_idle_skip이 충분히 처리. None도 의미있는 값으로 취급.
         """
         p = self.perception
         if p is None:
             return ()
         return (
             p.current_emotion,
-            p.person_count,
             # 새 음성 발화/호명 — STT 결과나 "네모" 호명 들어오면 즉시 agent tick
             p.last_user_speech_at,
             getattr(p, "last_user_called_at", 0),
@@ -1024,7 +1026,7 @@ class RobotAgent:
             actions, full_messages = await loop.run_in_executor(
                 None,
                 lambda m=messages, mdl=tick_model: conversation._client.generate_with_tools(
-                    "", _TOOLS, messages=m, model=mdl,
+                    "", _TOOLS, messages=m, model=mdl, system=_AGENT_SYSTEM,
                 ),
             )
             if not actions:

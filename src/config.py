@@ -182,9 +182,9 @@ class BehaviorConfig:
     idle_screen_dim_after_sec: int = 300    # 5분 부재
     idle_screen_off_after_sec: int = 1800   # 30분 부재
 
-    # 에이전트 결정 주기 — 30→60. 신호 변화(표정/시선/발화 등)는 별도
-    # 변화 트리거로 즉시 응답하므로 base는 idle 점검용. 토큰 비용 ½.
-    agent_interval_sec: float = 60.0        # Claude 결정 주기 (idle 점검)
+    # 에이전트 결정 주기 — 60→90. 신호 변화(표정/발화/호명)는 별도 변화
+    # 트리거로 즉시 응답하므로 base는 idle 점검용. 비용 절감.
+    agent_interval_sec: float = 90.0        # Claude 결정 주기 (idle 점검)
     agent_speak_min_gap_sec: float = 90.0   # 에이전트 발화 사이 최소 간격
     agent_dance_min_gap_sec: float = 120.0  # 에이전트 dance 사이 최소 간격 (격렬 방지)
 
