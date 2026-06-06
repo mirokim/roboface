@@ -12,6 +12,7 @@ import asyncio
 import collections
 import queue
 import threading
+import time
 from typing import Any
 
 from src.utils.logger import get_logger
@@ -57,6 +58,10 @@ class Microphone:
         self.sample_rate = sample_rate   # downstream(target) rate
         self._sd, _ = _load_backends()
         self._stream = None
+        # 마지막 callback 시각 (monotonic) — stall(ALSA broken) 감지용.
+        # 0.0이면 아직 시작 전. restart는 동시 호출 방지 lock.
+        self._last_callback_at = 0.0
+        self._restart_lock = threading.Lock()
         # 기본 큐 — frame() 호환성 유지
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=200)
         self._subscribers: list[queue.Queue[bytes]] = [self._queue]
@@ -142,6 +147,8 @@ class Microphone:
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ARG002
         if status:
             log.debug(f"sd status: {status}")
+        # stall watchdog용 — callback이 살아있음을 증명. ALSA broken 시 멈춤.
+        self._last_callback_at = time.monotonic()
         # indata: int16 numpy array shape (frames, native_channels)
         if self._needs_convert:
             data = self._convert_native_to_target(indata)
@@ -163,7 +170,8 @@ class Microphone:
     def open(self):  # context manager
         return self
 
-    def __enter__(self) -> "Microphone":
+    def _open_stream(self) -> None:
+        """RawInputStream 생성 + start. __enter__/restart 공용."""
         # native rate가 다르면 그 rate로 캡처 (callback에서 변환).
         # blocksize도 native rate 기준 30ms 프레임으로.
         open_rate = self._native_rate if self._needs_convert else self.sample_rate
@@ -171,27 +179,28 @@ class Microphone:
             self._native_channels if self._needs_convert else 1
         )
         open_blocksize = (open_rate * FRAME_MS) // 1000
+        self._stream = self._sd.RawInputStream(
+            samplerate=open_rate,
+            blocksize=open_blocksize,
+            device=self.device,
+            channels=open_channels,
+            dtype="int16",
+            callback=self._callback,
+        )
+        self._stream.start()
+        # callback이 아직 안 들어왔어도 갓 연 스트림은 살아있다고 간주 —
+        # watchdog이 즉시 stall로 오판하지 않게.
+        self._last_callback_at = time.monotonic()
+
+    def __enter__(self) -> "Microphone":
         try:
-            self._stream = self._sd.RawInputStream(
-                samplerate=open_rate,
-                blocksize=open_blocksize,
-                device=self.device,
-                channels=open_channels,
-                dtype="int16",
-                callback=self._callback,
-            )
-            self._stream.start()
+            self._open_stream()
         except Exception as e:
             # sounddevice.PortAudioError 등 — 디바이스 없음/잘못됨
             raise MicCaptureError(
                 f"오디오 디바이스 열기 실패 (device={self.device}): {e}"
             ) from e
-        log.info(
-            f"마이크 시작 (device={self.device}, "
-            f"{open_rate}Hz {open_channels}ch"
-            + (f" → {self.sample_rate}Hz 1ch" if self._needs_convert else "")
-            + ")"
-        )
+        log.info(f"마이크 시작 (device={self.device})")
         return self
 
     def __exit__(self, *exc) -> None:
@@ -200,6 +209,39 @@ class Microphone:
             self._stream.close()
             self._stream = None
         log.info("마이크 정지")
+
+    def frames_age_sec(self) -> float:
+        """마지막 callback 이후 경과 초 — stall(ALSA broken) 감지용.
+
+        정상 가동 중엔 callback이 30ms마다 와 항상 <1s. 스트림이 ALSA 레벨에서
+        깨지면 callback이 멈춰 값이 무한히 증가 → 호출자가 restart() 트리거.
+        0.0(아직 미시작)이면 0.0 반환 (stall로 오판 방지).
+        """
+        if self._last_callback_at == 0.0:
+            return 0.0
+        return time.monotonic() - self._last_callback_at
+
+    def restart(self) -> bool:
+        """스트림 stop/close 후 재오픈 — 장시간 가동 시 ALSA broken 복구용.
+
+        device/native format은 그대로 (재협상 불필요). 성공 시 True.
+        """
+        with self._restart_lock:
+            try:
+                if self._stream is not None:
+                    try:
+                        self._stream.stop()
+                        self._stream.close()
+                    except Exception as e:
+                        log.debug(f"기존 스트림 정리 실패(무시): {e}")
+                    self._stream = None
+                self._open_stream()
+                log.warning("🎤 마이크 스트림 재시작됨 (stall 복구)")
+                return True
+            except Exception as e:
+                log.warning(f"마이크 재시작 실패: {e}")
+                self._stream = None
+                return False
 
     async def frame(self, timeout: float = 1.0) -> bytes | None:
         """30ms PCM 프레임 한 개 (기본 큐). 타임아웃이면 None."""

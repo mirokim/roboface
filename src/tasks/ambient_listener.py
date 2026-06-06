@@ -207,11 +207,32 @@ class WhisperVADStreamer:
             return True
         return bool(getattr(self.perception, "user_present", True))
 
+    # 마이크 callback이 이 시간(초) 이상 멈추면 ALSA broken으로 보고 재시작.
+    _MIC_STALL_SEC = 8.0
+    _MIC_RESTART_COOLDOWN_SEC = 20.0
+
     async def stream(self) -> AsyncIterator[str]:
+        import time
+        last_restart = 0.0
         while True:
             # 사람 없으면 잠깐 쉬고 재체크 (STT 호출 자체 차단)
             if not self._user_present():
                 await asyncio.sleep(2.0)
+                continue
+            # 마이크 stall 감지 — 장시간 가동 시 USB/ALSA 스트림이 깨져 callback이
+            # 멈추면 record_utterance가 영원히 None만 반환(먹통). callback 무응답이
+            # 길면 스트림 재오픈으로 복구.
+            age = getattr(self.mic, "frames_age_sec", lambda: 0.0)()
+            now_mono = time.monotonic()
+            if (age > self._MIC_STALL_SEC
+                    and now_mono - last_restart > self._MIC_RESTART_COOLDOWN_SEC):
+                log.warning(
+                    f"마이크 stall 감지 (callback {age:.0f}s 무응답) — 스트림 재시작"
+                )
+                if hasattr(self.mic, "restart"):
+                    self.mic.restart()
+                last_restart = now_mono
+                await asyncio.sleep(0.5)
                 continue
             try:
                 wav = await self.recorder.record_utterance(max_sec=self.max_sec)
