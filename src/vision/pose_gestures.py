@@ -91,8 +91,12 @@ class HandsUpDetector:
     def __init__(
         self,
         fps: float = 5.0,
-        hold_sec: float = 0.35,   # 0.6 → 0.35 — 빨리 잡히게
-        cooldown_sec: float = 5.0,
+        # 0.35 → 1.2 — 기지개(팔을 위로 뻗으며 몸을 늘리는 유동적 동작)는
+        # 손목 위치가 계속 변해 consecutive가 리셋되므로 안 잡힘. 의도적 만세는
+        # 1.2초 정지 유지가 자연스러움. 기지개 false positive 차단.
+        hold_sec: float = 1.2,
+        # 5 → 45 — 설령 잡혀도 반복 질문("좋은 일 있어?") 방지.
+        cooldown_sec: float = 45.0,
     ) -> None:
         self.required_frames = max(2, int(fps * hold_sec))
         self.cooldown_sec = cooldown_sec
