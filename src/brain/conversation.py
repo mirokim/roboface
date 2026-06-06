@@ -23,12 +23,12 @@ log = get_logger("conversation")
 
 
 # === API 사용량 추적 ===
-# Sonnet 4.5 기준 가격 (per 1M tokens, USD). 모델 바뀌면 수정.
+# Haiku 4.5 기준 가격 (per 1M tokens, USD). 모델 바뀌면 수정.
 # https://www.anthropic.com/pricing
-_PRICE_INPUT_USD = 3.0
-_PRICE_CACHE_WRITE_USD = 3.75
-_PRICE_CACHE_READ_USD = 0.30
-_PRICE_OUTPUT_USD = 15.0
+_PRICE_INPUT_USD = 1.0
+_PRICE_CACHE_WRITE_USD = 1.25
+_PRICE_CACHE_READ_USD = 0.10
+_PRICE_OUTPUT_USD = 5.0
 
 
 class _UsageTracker:

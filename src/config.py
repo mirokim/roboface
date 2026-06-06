@@ -115,12 +115,13 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "claude").lower()
 
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-# 모델 분리: idle 점검(do_nothing 위주)엔 Haiku, 사용자 발화/호명 직후엔 Sonnet.
-# Haiku 4.5의 speak 빈 input 버그는 agent._do_speak가 empty text skip으로 가드.
-# 사용자 응답 누락 위험은 Sonnet 사용 윈도우에서 0.
-CLAUDE_MODEL = "claude-sonnet-4-6"          # 사용자 발화/호명 직후 — 응답 보장
-CLAUDE_MODEL_LIGHT = "claude-haiku-4-5"     # idle tick — 대부분 do_nothing
-CLAUDE_MODEL_HEAVY = "claude-sonnet-4-6"    # 일정 추출 등 정밀 작업
+# 비용 절감: Sonnet 전면 배제 — 모든 경로 Haiku 4.5 통일 (in $1/out $5,
+# Sonnet 대비 1/3~1/4). agent 결정/대화 응답/일정 추출 모두 짧은 작업이라
+# Haiku로 충분. Haiku 4.5의 speak 빈 input 버그는 agent._do_speak의 empty
+# text skip 가드로 방어.
+CLAUDE_MODEL = "claude-haiku-4-5"           # 대화 응답 기본
+CLAUDE_MODEL_LIGHT = "claude-haiku-4-5"     # agent tick (idle + 발화 응답)
+CLAUDE_MODEL_HEAVY = "claude-haiku-4-5"     # 일정 추출 등 정형 출력
 
 # === ThinkTank 통합 ===
 THINKTANK_BASE_URL = os.getenv("THINKTANK_BASE_URL", "http://localhost:3001")

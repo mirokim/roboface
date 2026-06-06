@@ -30,7 +30,6 @@ from src.config import (
     AMBIENT_LISTEN,
     ANTHROPIC_API_KEY,
     BEHAVIOR,
-    CLAUDE_MODEL,
     CLAUDE_MODEL_LIGHT,
     LLM_BACKEND,
     OPENAI_API_KEY,
@@ -943,18 +942,24 @@ class RobotAgent:
             last_signals = cur_signals
 
     def _snapshot_signals(self) -> tuple:
-        """현재 perception 신호 스냅샷 — 변화 감지용. None도 의미있는 값으로 취급."""
+        """현재 perception 신호 스냅샷 — 변화 감지(즉시 tick)용.
+
+        **의미 있는 변화만** 포함: 표정 전이 / 사람 수 / 새 발화 / 호명.
+        gaze_target·activity_level·posture_category는 사용자가 가만히 작업만 해도
+        2초 폴링마다 수시로 흔들리는 잡신호 — 이걸로 즉시 tick하면 대부분
+        do_nothing인데 API만 소모(최대 시간당 ~720회)했음. 이런 변화는 base
+        interval(60s) tick + _should_idle_skip이 충분히 처리하므로 제외.
+        None도 의미있는 값으로 취급.
+        """
         p = self.perception
         if p is None:
             return ()
         return (
             p.current_emotion,
-            p.gaze_target,
-            p.activity_level,
             p.person_count,
-            p.posture_category,
-            # 새 음성 발화도 트리거 신호 — STT 결과 들어오면 즉시 agent tick
+            # 새 음성 발화/호명 — STT 결과나 "네모" 호명 들어오면 즉시 agent tick
             p.last_user_speech_at,
+            getattr(p, "last_user_called_at", 0),
         )
 
     async def _tick(self) -> None:
@@ -1010,22 +1015,10 @@ class RobotAgent:
 
         messages: list[dict] = [{"role": "user", "content": content}]
 
-        # 모델 선택 — 사용자가 최근 15s 안에 발화/호명했으면 Sonnet(응답 보장),
-        # 그 외 idle 점검(대부분 do_nothing)엔 Haiku로 비용 절감.
-        now_for_model = time.time()
-        last_speech = (
-            getattr(self.perception, "last_user_speech_at", 0)
-            if self.perception is not None else 0
-        )
-        last_called = (
-            getattr(self.perception, "last_user_called_at", 0)
-            if self.perception is not None else 0
-        )
-        user_recent = (
-            (last_speech > 0 and now_for_model - last_speech < 15.0)
-            or (last_called > 0 and now_for_model - last_called < 15.0)
-        )
-        tick_model = CLAUDE_MODEL if user_recent else CLAUDE_MODEL_LIGHT
+        # 모델은 항상 Haiku — agent tick은 발화 응답이든 idle 점검이든 모두
+        # 짧은 1-2문장 결정이라 Haiku로 충분. Sonnet은 비용 4배(in $3 vs $1,
+        # out $15 vs $5)라 의도적으로 배제.
+        tick_model = CLAUDE_MODEL_LIGHT
 
         for round_idx in range(_MAX_AGENT_ROUNDS):
             actions, full_messages = await loop.run_in_executor(
