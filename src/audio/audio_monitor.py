@@ -147,6 +147,20 @@ class AudioMonitor:
             self._onsets.clear()
             log.info("audio_monitor: 재개 (onset buffer clear)")
 
+    def end_music_session(self) -> None:
+        """외부 dance loop이 끝났음을 알림 — music 상태 완전 리셋.
+
+        dance 중엔 set_paused(True)라 _check_music이 안 돌아 음악 종료(stop)가
+        영영 안 옴. dance가 스스로(최대시간 도달) 끝날 때 이걸 호출해
+        _music_playing/onset/paused를 직접 정리. 실제 음악이 계속되면 resume 후
+        onset이 다시 쌓여 재감지된다. (set_paused(False)만으론 _music_playing이
+        True로 stuck돼 이후 박수/음악 감지가 영구히 죽던 버그 방어.)
+        """
+        self._music_playing = False
+        self._onsets.clear()
+        self._paused = False
+        log.info("audio_monitor: music 세션 종료 (상태 리셋)")
+
     def _detect_onset(self, rms: float, now: float, peak: float = 0.0) -> bool:
         """현재 frame이 onset인지 판단 + baseline 갱신.
 
@@ -192,6 +206,20 @@ class AudioMonitor:
                 median = intervals[len(intervals) // 2]
                 if median <= 0:
                     return
+                # 간격 규칙성 — 음악 비트는 일정(낮은 변동계수), 사람 박수는
+                # 들쭉날쭉. CV(표준편차/평균)가 크면 박수/잡음으로 보고 음악 X.
+                # 박수 연타가 onset 수만 채워 음악으로 오분류 → 무한 dance 되던 거 차단.
+                if len(intervals) >= 4:
+                    mean_i = sum(intervals) / len(intervals)
+                    if mean_i > 0:
+                        var = sum((x - mean_i) ** 2 for x in intervals) / len(intervals)
+                        cv = (var ** 0.5) / mean_i
+                        if cv > 0.6:
+                            log.debug(
+                                f"onset 간격 불규칙 (CV={cv:.2f}) — "
+                                f"음악 아님 (박수/잡음 가능)"
+                            )
+                            return
                 raw_bpm = 60.0 / median
                 # raw BPM 너무 낮으면(예: 박수 띄엄띄엄) 음악 아님 — octave 보정 전.
                 # 박수 4초 간격(BPM 15) × 4(보정) = 60에 도달해도 reject.

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from src.audio.audio_monitor import AudioMonitor
 from src.audio.mic import Microphone
@@ -91,6 +92,11 @@ class AudioReactive:
         self.ctx.transition(State.GREETING, self.face)
         if self._monitor is not None:
             self._monitor.set_paused(True)
+        # 박수 오인 시 무한 dance 방지 — 최대 지속 후 스스로 종료. 진짜 음악이
+        # 계속되면 resume 뒤 onset이 다시 쌓여 재감지됨. dance 중엔 paused라
+        # _check_music이 안 돌아 music_stop이 영영 안 오므로 이 가드가 필수.
+        max_dance_sec = 8.0
+        started_at = time.monotonic()
         # GREETING은 head_tracker가 이미 양보하지만, 명시적으로 lock도 잡아 안전.
         async with motion_busy_scope(self.ctx):
             try:
@@ -102,6 +108,9 @@ class AudioReactive:
                         )
                     else:
                         await asyncio.sleep(60.0 * 8 / bpm)
+                    if time.monotonic() - started_at >= max_dance_sec:
+                        log.info("🎵 dance 최대 지속 도달 — 종료 (음악 계속되면 재감지)")
+                        break
             except asyncio.CancelledError:
                 log.info("🎵 음악 dance 종료 — 정리 중")
                 raise
@@ -110,15 +119,15 @@ class AudioReactive:
                     State.WATCHING if self.ctx.user_present else State.IDLE,
                     self.face,
                 )
-                # 서보 노이즈 잔향 가시면 baseline 안정 후 resume — 짧게 1초.
-                # sleep이 다시 cancel 받아도(드뭄, 보통 task.cancel() 1회) resume은
-                # 무조건 호출 — paused True로 stuck되면 박수/음악 감지 영구 죽음.
+                # 서보 노이즈 잔향 가시면 baseline 안정 후 음악 세션 리셋 — 짧게 1초.
+                # sleep이 다시 cancel 받아도(드뭄) 리셋은 무조건 호출 — music_playing
+                # True로 stuck되면 박수/음악 감지가 영구히 죽음.
                 if self._monitor is not None:
                     try:
                         await asyncio.sleep(1.0)
                     except asyncio.CancelledError:
                         pass
-                    self._monitor.set_paused(False)
+                    self._monitor.end_music_session()
 
     async def run(self) -> None:
         self._monitor = AudioMonitor(
