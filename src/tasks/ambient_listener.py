@@ -46,13 +46,18 @@ def _is_hallucination(text: str) -> bool:
 # 로봇 이름 (캐릭터). 호명 패턴 매칭에 사용 — agent _AGENT_SYSTEM에도 동일.
 ROBOT_NAME = "네모"
 
+# 약한 마이크 + 로컬 Whisper(small)가 "네모"를 자주 이렇게 오인식.
+# 호격(~야/~아/야~)일 때만 변형을 인정 — 단독 "메모"(memo) 등 false positive 방지.
+_NAME_VARIANTS = ("네모", "메모", "내모", "네무", "내무", "냬모")
+
 
 def _is_calling_robot(text: str) -> bool:
     """사용자가 로봇 호명한 발화인지 — 호격 또는 단어 단위 시작/끝 위치.
 
     matched:
       - "네모야 안녕" / "야 네모" / "네모아" (호격)
-      - "네모 뭐해" / "안녕 네모" (단어 경계 시작/끝)
+      - "메모야" / "내 모야" (STT 오인식 변형 — 호격일 때만)
+      - "네모 뭐해" / "안녕 네모" (단어 경계 시작/끝, 정확한 "네모"만)
     not matched (false positive 차단):
       - "네모난 박스" (시작이지만 "네모"가 단어 아님 — 형용사 prefix)
       - "그 네모 영화" / "이거 네모 모양" (중간 위치)
@@ -61,11 +66,12 @@ def _is_calling_robot(text: str) -> bool:
     n_no_space = "".join(text.lower().split()).rstrip(".!?,~")
     if not n_no_space:
         return False
-    # 호격 — 공백 무관, 가장 명확한 호명 ("네모야", "야네모")
-    if f"{ROBOT_NAME}야" in n_no_space or f"{ROBOT_NAME}아" in n_no_space:
-        return True
-    if f"야{ROBOT_NAME}" in n_no_space:
-        return True
+    # 호격 — 공백 무관, 가장 명확한 호명. 이름 + STT 오인식 변형 모두 인정.
+    for nm in _NAME_VARIANTS:
+        if f"{nm}야" in n_no_space or f"{nm}아" in n_no_space:
+            return True
+        if f"야{nm}" in n_no_space:
+            return True
     # 단어 단위 시작/끝 — 원본 token 단위 (단어 경계 보존).
     # "네모난"은 "네모"로 시작하지만 separate token이라 첫 토큰 != "네모" → 매칭 X.
     tokens = [t.lower().strip(".!?,~") for t in text.split()]
