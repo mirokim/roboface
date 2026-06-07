@@ -105,6 +105,19 @@ def _flatten_content(content: Any) -> str:
     return str(content)
 
 
+# Qwen2.5-3B는 tool-calling 모드에서 한국어 system을 받고도 영어로 답하는
+# 경향이 있음. system 끝에 강한 한국어 강제(한/영 병기 — 작은 모델엔 영어
+# 메타지시가 더 잘 먹힘)를 붙여 speak의 text를 한국어로 고정. agent 경로
+# (generate_with_tools)에만 적용 — JSON 출력하는 generate(extract_schedule)엔 X.
+_KOREAN_ENFORCE = (
+    "\n\n# 최우선 출력 규칙 (다른 모든 것에 우선)\n"
+    "- 모든 발화와 speak 도구의 `text` 인자는 **반드시 한국어**로만 작성한다.\n"
+    "- 영어 문장·단어로 답하지 않는다. 이모지도 쓰지 않는다.\n"
+    "- ALWAYS respond ONLY in Korean. NEVER use English. "
+    "The `text` argument of the speak tool MUST be written in Korean."
+)
+
+
 def _anthropic_messages_to_openai(messages: list[dict], system: str) -> list[dict]:
     """Anthropic messages 배열 → OpenAI messages 배열.
 
@@ -306,7 +319,9 @@ class LocalLLMClient:
             return [], []
         if messages is None:
             messages = [{"role": "user", "content": user_prompt}]
-        openai_messages = _anthropic_messages_to_openai(messages, system)
+        openai_messages = _anthropic_messages_to_openai(
+            messages, (system or "") + _KOREAN_ENFORCE,
+        )
         openai_tools = _anthropic_tools_to_openai(tools)
         try:
             with self._lock:
