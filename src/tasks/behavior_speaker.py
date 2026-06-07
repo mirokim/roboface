@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 
 from src.audio.fake_tts import speak as fake_speak
-from src.brain import conversation, memory
+from src.brain import memory
 from src.brain.state_machine import State, StateContext
 from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
@@ -186,27 +186,15 @@ FACE_GREETING_TEMPLATES = (
 
 
 def _claude_situational(event_kind: str, ctx: StateContext, extra: dict | None = None) -> str:
-    """Claude 기반 상황 멘트 — 실패/없으면 빈 문자열 (caller가 풀로 fallback).
+    """행동 멘트는 템플릿 풀만 사용 — 항상 "" 반환(caller가 풀 fallback).
 
-    빈 문자열 반환 시 caller에서 풀 사용. 명시적 로그는 caller 책임.
+    비용 절감: 이전엔 매 reappear/closer/farther/face_greeting마다
+    generate_situational(Claude)를 먼저 호출 → 거리 변화·재등장이 잦아 시간당
+    수십~수백 호출(숨은 비용원)이었음. 풀(REAPPEAR/TIME_GREETINGS/GOT_* 등)이
+    충분히 다양해 체감 차이 작음. Claude 멘트가 다시 필요하면 여기에 BEHAVIOR
+    토글을 추가해 되살릴 수 있음.
     """
-    try:
-        recent = memory.recent_conversation(minutes=20.0, limit=8)
-    except Exception:
-        recent = None
-    try:
-        msg = conversation.generate_situational(
-            event_kind,
-            user_name=getattr(ctx, "user_name", None),
-            extra=extra,
-            recent_dialog=recent,
-        )
-        if not msg:
-            log.debug(f"situational[{event_kind}]: Claude empty → caller fallback")
-        return msg
-    except Exception as e:
-        log.debug(f"situational[{event_kind}]: Claude 예외 → caller fallback: {e}")
-        return ""
+    return ""
 
 
 def reappear_message(absence_sec: float, ctx: StateContext) -> str:
@@ -251,27 +239,12 @@ def farther_message(ctx: StateContext | None = None) -> str:
 
 
 def _claude_situational_noctx(event_kind: str) -> str:
-    """ctx 없을 때도 최근 대화는 끌어다 씀."""
-    try:
-        recent = memory.recent_conversation(minutes=20.0, limit=8)
-    except Exception:
-        recent = None
-    try:
-        return conversation.generate_situational(
-            event_kind, recent_dialog=recent,
-        )
-    except Exception:
-        return ""
+    """행동 멘트는 풀만 사용 — 항상 "" 반환 (비용 절감, _claude_situational 참조)."""
+    return ""
 
 
 def face_greeting_message(name: str) -> str:
-    desc = f"얼굴을 인식해서 {name}이라는 등록된 사람임을 처음 알아챘다 — 이름 부르며 인사"
-    try:
-        msg = conversation.generate_situational(desc, user_name=name)
-        if msg:
-            return msg
-    except Exception:
-        pass
+    # 비용 절감 — 템플릿만 사용 (Claude generate_situational 호출 제거)
     template = _pick_fresh(FACE_GREETING_TEMPLATES)
     return template.format(name=name)
 

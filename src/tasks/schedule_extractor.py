@@ -7,6 +7,7 @@ LLM 실패 / ThinkTank 다운 시 로컬 큐에 쌓고 나중에 재전송.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 from src.brain import conversation, memory
@@ -16,8 +17,25 @@ from src.utils.logger import get_logger
 log = get_logger("schedule")
 
 
+# 시간/일정 단서 사전 필터 — 이게 없으면 Claude 추출 호출 자체를 skip.
+# ambient STT가 노이즈로 발화를 자주 잡아(시간당 수백) 매 발화마다
+# extract_schedule(Claude)를 부르던 게 큰 숨은 비용원이었음. 일상 발화 대부분은
+# 시간 표현이 없으므로 사전 정규식으로 거른 뒤에만 Claude 호출.
+_SCHEDULE_HINT_RE = re.compile(
+    r"\d+\s*(시|분|일|월|시간|주)"          # 3시, 10분, 5일, 2주
+    r"|내일|모레|글피|이따|나중에"
+    r"|약속|회의|미팅|마감|데드라인|예약|일정|스케줄|행사|모임"
+    r"|[월화수목금토일]요일"
+    r"|다음\s*주|이번\s*주|담주|주말"
+    r"|오전|오후"
+)
+
+
 async def handle_transcript(text: str) -> None:
     """ambient_listener handler — 발화 한 줄당 호출."""
+    # 시간/일정 단서 없으면 Claude 추출 skip (비용 절감)
+    if not _SCHEDULE_HINT_RE.search(text):
+        return
     events = conversation.extract_schedule(text)
     if not events:
         return
