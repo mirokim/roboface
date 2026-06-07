@@ -83,6 +83,27 @@ def draw_env_overlay(
     canvas.blit(surf, (x, y))
 
 
+# ─── LLM 백엔드 라벨 (좌하단) ───
+
+_BACKEND_FONT_SIZE = 11
+# 라벨은 거의 안 바뀜 — 매 프레임 폰트 렌더 낭비 막으려 surface 캐시.
+_BACKEND_CACHE: tuple[str, pygame.Surface] | None = None
+
+
+def draw_backend_label(canvas: pygame.Surface, label: str | None) -> None:
+    """좌하단에 현재 LLM 백엔드 표시 (예: "Claude" / "Qwen")."""
+    if not label:
+        return
+    global _BACKEND_CACHE
+    if _BACKEND_CACHE is None or _BACKEND_CACHE[0] != label:
+        font = get_font(_BACKEND_FONT_SIZE)
+        # 흐릿한 회색 — 얼굴 방해 X (env 오버레이와 동일 톤)
+        _BACKEND_CACHE = (label, font.render(label, True, (140, 140, 150)))
+    surf = _BACKEND_CACHE[1]
+    h = surf.get_height()
+    canvas.blit(surf, (_ENV_PADDING_PX, DISPLAY_HEIGHT - h - _ENV_PADDING_PX))
+
+
 # ─── 떨림 (shiver) ───
 SHIVER_FREQ_HZ = 7.0
 SHIVER_MAX_PX = 4

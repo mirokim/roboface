@@ -104,6 +104,44 @@ def get_usage_summary() -> str:
     return _usage.summary()
 
 
+def current_backend_label() -> str:
+    """현재 LLM이 실제로 무엇으로 도는지 — LCD 하단 표시용 짧은 라벨.
+
+    - local 백엔드 → "Qwen" (로컬)
+    - claude 백엔드 → "Claude"
+    - hybrid → 동적: 오프라인/크레딧소진으로 로컬 fallback 중이면 "Qwen",
+      평소엔 "Claude". (_HybridClient._offline_until로 판정)
+    """
+    if LLM_BACKEND == "local":
+        return "Qwen"
+    if LLM_BACKEND == "hybrid":
+        cli = _client
+        if isinstance(cli, _HybridClient) and not cli._try_claude_first():
+            return "Qwen"
+        return "Claude"
+    return "Claude"
+
+
+def _is_offline_like(e: Exception) -> bool:
+    """hybrid 모드에서 로컬 fallback해야 하는 에러인지.
+
+    - APIConnectionError/APITimeoutError: 네트워크 끊김 (원래 fallback 대상)
+    - 크레딧 잔액 부족(400 invalid_request, "credit balance is too low"):
+      Claude를 사실상 못 쓰는 상태 → 침묵 대신 로컬로. 400이라 connection
+      error는 아니지만 fallback 가치 있음.
+    """
+    try:
+        from anthropic import (  # type: ignore[import-not-found]
+            APIConnectionError, APITimeoutError,
+        )
+        if isinstance(e, (APIConnectionError, APITimeoutError)):
+            return True
+    except ImportError:
+        pass
+    msg = str(e).lower()
+    return "credit balance" in msg or "too low" in msg
+
+
 SYSTEM_PROMPT = """당신은 사용자 책상 위에 있는 작은 캐릭터 로봇입니다.
 이름: Roboface (또는 사용자가 정한 이름).
 
@@ -281,17 +319,10 @@ class _ClaudeClient:
             ]
             return actions, full_messages
         except Exception as e:
-            # 오프라인 감지 — APIConnectionError/APITimeoutError. hybrid 모드에서
-            # 호출자가 로컬 fallback 가능하도록 raise.
-            if raise_offline:
-                try:
-                    from anthropic import (  # type: ignore[import-not-found]
-                        APIConnectionError, APITimeoutError,
-                    )
-                    if isinstance(e, (APIConnectionError, APITimeoutError)):
-                        raise
-                except ImportError:
-                    pass
+            # 오프라인/크레딧 소진 감지 — hybrid 모드에서 호출자가 로컬 fallback
+            # 하도록 raise (연결 실패·타임아웃 + 크레딧 잔액 부족).
+            if raise_offline and _is_offline_like(e):
+                raise
             log.warning(f"Claude tool 호출 실패: {e}")
             return [], []
 
@@ -361,16 +392,9 @@ class _HybridClient:
                 self._offline_until = 0.0
                 return text.strip()
             except Exception as e:
-                try:
-                    from anthropic import (  # type: ignore[import-not-found]
-                        APIConnectionError, APITimeoutError,
-                    )
-                    if isinstance(e, (APIConnectionError, APITimeoutError)):
-                        self._mark_offline(str(e))
-                    else:
-                        log.warning(f"Claude generate 실패: {e}")
-                        return ""
-                except ImportError:
+                if _is_offline_like(e):
+                    self._mark_offline(str(e))
+                else:
                     log.warning(f"Claude generate 실패: {e}")
                     return ""
         # 오프라인 모드

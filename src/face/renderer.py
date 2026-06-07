@@ -171,6 +171,12 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     # 환경 오버레이 — 우하단 작은 텍스트 (얼굴이 밝을 때만, 절전 시엔 X)
     if face.brightness >= 0.5:
         extras.draw_env_overlay(canvas, face.env_temp_c, face.env_humidity_pct)
+        # 현재 LLM 백엔드 — 좌하단 (Claude / Qwen). hybrid는 동적으로 바뀜.
+        try:
+            from src.brain.conversation import current_backend_label
+            extras.draw_backend_label(canvas, current_backend_label())
+        except Exception:
+            pass
 
     # 녹음 인디케이터
     if face.recording:
