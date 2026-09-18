@@ -77,7 +77,7 @@ class RemoteLLMClient:
         resp = self._post({
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system},
+                {"role": "system", "content": (system or "") + _KOREAN_ENFORCE},
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": max_tokens,

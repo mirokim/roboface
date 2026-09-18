@@ -125,6 +125,7 @@ src/
 | 무엇 | 어디 | 비고 |
 |---|---|---|
 | 모드/핀맵/API 키 | [src/config.py](src/config.py) | 환경변수 우선 |
+| LLM 백엔드 | [src/config.py](src/config.py) `LLM_BACKEND` | `claude` / `local`(Pi llama-cpp Qwen 3B) / `hybrid`(Claude→로컬 fallback) / **`remote`**(LAN PC Ollama `LLM_REMOTE_URL`/`MODEL`/`VISION`, 안 닿으면 로컬 fallback — [src/brain/remote_llm.py](src/brain/remote_llm.py), [docs/setup-pc-llm.md](docs/setup-pc-llm.md)). 모두 `generate`/`generate_with_tools` 동일 인터페이스 |
 | 음성/STT 토글 env | [src/config.py](src/config.py) | `TTS_DISABLED`, `AMBIENT_LISTEN`, `WAKE_DISABLED`, `STT_BACKEND` (auto/local/openai), `STT_LOCAL_MODEL` (tiny/base/small) |
 | 원격 제어 모드 env | [src/config.py](src/config.py) | `AGENT_DISABLED=1` (자율 Claude 호출 전부 off: agent 루프 + `generate_situational`/`generate_proactive_message`가 "" 반환 → 전부 로컬 풀 fallback. 로컬 트리거(휴식 권유/자세/잡담 풀/인사)는 계속 동작), `SELF_TALK_DISABLED=1` (proactive 루프 + 잔소리/운세/recap 정지 — 단 `behavior_speaker._SOCIAL_KINDS`(인사/새 얼굴/손인사/제스처 반응)는 통과). 외부 세션(`ssh roboface` + robot_cli)에서 직접 제어할 때 둘 다 켬 |
 | 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임, agent vision 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |

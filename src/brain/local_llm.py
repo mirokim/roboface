@@ -285,7 +285,7 @@ class LocalLLMClient:
             with self._lock:
                 resp = llm.create_chat_completion(
                     messages=[
-                        {"role": "system", "content": system},
+                        {"role": "system", "content": (system or "") + _KOREAN_ENFORCE},
                         {"role": "user", "content": user_prompt},
                     ],
                     max_tokens=max_tokens,
