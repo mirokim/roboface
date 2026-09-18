@@ -328,7 +328,7 @@ class AudioMonitor:
                 #   abs_peak < clap_peak_min(3000) 이면 마이크 신호 약해 transient
                 #   감지도 어려움. 임계 더 낮추거나 OS 게인 올려야.
                 if frame_count % 165 == 0:
-                    log.info(
+                    log.debug(
                         f"audio_monitor 5s 통계: baseline≈{self._baseline:.0f}, "
                         f"rms_peak={rms_peak_window:.0f}/{self.clap_absolute_min:.0f}, "
                         f"abs_peak={abs_peak_window:.0f}/{self.clap_peak_min:.0f}"
