@@ -76,10 +76,21 @@ async def fire_trigger(
             log.debug(f"{trig.kind}: Claude 멘트 생성 실패 — fallback: {e}")
     if not message:
         message = trig.suggested_message or ""
+    if not message and trig.kind == "greeting":
+        # Claude 없을 때 greeting 풀 fallback (시간대 인사)
+        from src.tasks import behavior_speaker
+        message = behavior_speaker.reappear_message(60.0, ctx)
     if not message:
+        # 빈 멘트여도 "처리했다"는 기록은 남겨야 같은 트리거가 매초 재발화하지 않음
+        # (greeting이 GREETING 전이+끄덕만 반복하던 버그).
         log.debug(f"{trig.kind}: 빈 멘트, skip")
+        ctx.last_proactive_at = time.time()
+        if trig.kind == "greeting":
+            ctx.last_greeting_at = ctx.last_proactive_at
         if motion_task is not None:
             await motion_task
+        if ctx.state == State.GREETING:
+            ctx.transition(State.WATCHING if ctx.user_present else State.IDLE, face)
         return
 
     log.info(f"🗣️  {message}")
