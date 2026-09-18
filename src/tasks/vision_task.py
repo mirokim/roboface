@@ -143,6 +143,8 @@ async def run_vision(
     last_recognize_at = 0.0
     last_face_reload_at = time.time()
     last_face_match_at = 0.0
+    last_emotion_at = 0.0
+    hand_frame_ctr = 0
     last_named_person: str | None = None
     last_named_at = 0.0
     last_person_left_at = 0.0
@@ -537,13 +539,18 @@ async def run_vision(
                                 gaze_detector.reset()
                     # MediaPipe Hands (CPU) — 손 21 keypoint + 7 카테고리 + wave.
                     # IMX500 pose는 손목만 알지 손 모양 모름. 이게 보강.
+                    # CPU 무거움(~40ms) → 격프레임 + executor 스레드 (루프 블로킹 X)
+                    hand_frame_ctr += 1
                     if (hand_gesture is not None and frame is not None
-                            and gesture_gate_ok):
+                            and gesture_gate_ok
+                            and hand_frame_ctr % BEHAVIOR.hand_gesture_every_n_frames == 0):
                         rgb = _to_rgb(frame)
                         if rgb is not None:
                             ts_ms = int(time.time() * 1000)
                             try:
-                                gname, mp_wave = hand_gesture.process(rgb, ts_ms)
+                                gname, mp_wave = await asyncio.get_running_loop().run_in_executor(
+                                    None, hand_gesture.process, rgb, ts_ms,
+                                )
                             except Exception as e:
                                 log.debug(f"hand_gesture 에러: {e}")
                                 gname, mp_wave = None, False
@@ -561,8 +568,13 @@ async def run_vision(
                                     ))
 
                     cur_emotion: str | None = None
-                    if emotion_mirror is not None and face is not None:
-                        emotion = emotion_mirror.process(frame, effective_bbox)
+                    # haar 캐스케이드 ~30ms — 표정은 emotion_interval_sec마다면 충분
+                    if (emotion_mirror is not None and face is not None
+                            and time.time() - last_emotion_at >= BEHAVIOR.emotion_interval_sec):
+                        last_emotion_at = time.time()
+                        emotion = await asyncio.get_running_loop().run_in_executor(
+                            None, emotion_mirror.process, frame, effective_bbox,
+                        )
                         if emotion == EMOTION_SMILE:
                             from src.face.expressions import HAPPY
                             flash_expression(face, HAPPY, 1.5)

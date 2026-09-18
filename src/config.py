@@ -265,6 +265,9 @@ class BehaviorConfig:
     # IMX500 캡처 루프 목표 fps — 센서 FrameRate + 루프 period. 실제 fps는
     # 캡처+후처리(HigherHRNet CPU 디코딩) 시간에 묶임. 로그 "camera capture+postprocess" 참조
     vision_target_fps: float = 15.0
+    # 프레임당 CPU 절약: MediaPipe 손 인식은 N프레임마다, 표정 거울(haar)은 N초마다
+    hand_gesture_every_n_frames: int = 2
+    emotion_interval_sec: float = 0.4
 
     # head_tracker가 사람 bbox 중심을 프레임의 어느 높이에 둘지 (0=상단, 1=하단).
     # 0.5면 얼굴만 가득 차서 손/몸통이 프레임 밖 → 손 흔들기 인식 불가. 0.38로
