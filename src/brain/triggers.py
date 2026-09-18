@@ -372,8 +372,8 @@ def _pick_chitchat_message(
         msg = random.choice(random.choice(pools))
     # 이름 알면 40% 확률로 prefix
     if user_name and random.random() < 0.4:
-        prefix = random.choice([f"{user_name}아, ", f"{user_name}, ", f"{user_name}! "])
-        msg = prefix + msg
+        from src.brain.korean import name_prefix
+        msg = name_prefix(user_name) + msg
     return msg
 
 

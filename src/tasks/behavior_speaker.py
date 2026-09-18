@@ -14,6 +14,7 @@ from datetime import datetime
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import memory
 from src.brain.state_machine import State, StateContext
+from src.brain.korean import name_prefix
 from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
 from src.config import BEHAVIOR, SELF_TALK_DISABLED
@@ -115,15 +116,8 @@ def say(
 
 
 def _name_prefix(ctx: StateContext) -> str:
-    """이름 알면 '{이름}아, '나 '{이름}! ' 같이 prefix."""
-    name = getattr(ctx, "user_name", None)
-    if not name:
-        return ""
-    # 호격 조사: 받침 있으면 "아", 없으면 "야". "님"으로 끝나는 호칭엔 안 붙임.
-    if name.endswith("님") or not ("가" <= name[-1] <= "힣"):
-        return random.choice([f"{name}, ", f"{name}! "])
-    voc = "아" if (ord(name[-1]) - 0xAC00) % 28 else "야"
-    return random.choice([f"{name}{voc}, ", f"{name}, ", f"{name}! "])
+    """이름 알면 '{이름}야, '나 '{이름}! ' 같이 prefix (korean.name_prefix SSOT)."""
+    return name_prefix(getattr(ctx, "user_name", None))
 
 
 def _pick_fresh(pool: tuple[str, ...], minutes: float = 30.0) -> str:
