@@ -113,8 +113,11 @@ def _name_prefix(ctx: StateContext) -> str:
     name = getattr(ctx, "user_name", None)
     if not name:
         return ""
-    suffix = random.choice([f"{name}아, ", f"{name}, ", f"{name}! "])
-    return suffix
+    # 호격 조사: 받침 있으면 "아", 없으면 "야". "님"으로 끝나는 호칭엔 안 붙임.
+    if name.endswith("님") or not ("가" <= name[-1] <= "힣"):
+        return random.choice([f"{name}, ", f"{name}! "])
+    voc = "아" if (ord(name[-1]) - 0xAC00) % 28 else "야"
+    return random.choice([f"{name}{voc}, ", f"{name}, ", f"{name}! "])
 
 
 def _pick_fresh(pool: tuple[str, ...], minutes: float = 30.0) -> str:
