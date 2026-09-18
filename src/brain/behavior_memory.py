@@ -210,8 +210,11 @@ def remarks(now: float | None = None) -> list[str]:
 
     # 기억 멘트는 12시간 안에 이미 한 건 제외 (같은 사실 반복 X)
     try:
+        import re as _re
         said = memory.recent_robot_messages(minutes=720)
-        out = [m for m in out if not any(m in s for s in said)]
+        _strip = lambda t: _re.sub(r"[0-9]+", "#", t)      # 숫자만 다른 같은 멘트도 중복
+        said_norm = [_strip(t) for t in said]
+        out = [m for m in out if not any(_strip(m) in t for t in said_norm)]
     except Exception:
         pass
     return out
