@@ -16,6 +16,7 @@ from src.brain import memory
 from src.brain.state_machine import State, StateContext
 from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
+from src.config import SELF_TALK_DISABLED
 from src.face.expressions import Expression
 from src.face.renderer import FaceState
 from src.utils.logger import get_logger
@@ -58,6 +59,9 @@ def say(
     - 인사류(_GREETING_KINDS): 마지막 인사 후 5분 안엔 skip
     """
     if not text:
+        return None
+    if SELF_TALK_DISABLED:
+        log.debug(f"say skip [{kind}]: SELF_TALK_DISABLED")
         return None
     if _busy_state(ctx):
         log.debug(f"say skip [{kind}]: busy state ({ctx.state})")

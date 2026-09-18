@@ -14,7 +14,7 @@ from src.brain import conversation, memory
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.triggers import ProactiveTrigger, evaluate_all, expression_for
-from src.config import BEHAVIOR
+from src.config import BEHAVIOR, SELF_TALK_DISABLED
 from src.face.renderer import FaceState
 from src.motion import poses
 from src.motion.servos import ServoController
@@ -117,6 +117,9 @@ async def run_loop(
     perception: PerceptionState | None = None,
 ) -> None:
     """주기적으로 트리거 평가 (BEHAVIOR.proactive_eval_interval_sec)."""
+    if SELF_TALK_DISABLED:
+        log.info("proactive_speaker 비활성 (SELF_TALK_DISABLED=1)")
+        return
     while True:
         await asyncio.sleep(BEHAVIOR.proactive_eval_interval_sec)
         if ctx.state in (State.TALKING, State.LISTENING):

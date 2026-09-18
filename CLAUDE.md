@@ -126,6 +126,7 @@ src/
 |---|---|---|
 | 모드/핀맵/API 키 | [src/config.py](src/config.py) | 환경변수 우선 |
 | 음성/STT 토글 env | [src/config.py](src/config.py) | `TTS_DISABLED`, `AMBIENT_LISTEN`, `WAKE_DISABLED`, `STT_BACKEND` (auto/local/openai), `STT_LOCAL_MODEL` (tiny/base/small) |
+| 원격 제어 모드 env | [src/config.py](src/config.py) | `AGENT_DISABLED=1` (자율 agent 루프 정지 — Claude API 호출 X), `SELF_TALK_DISABLED=1` (proactive/behavior_speaker 혼잣말 정지). 외부 세션(`ssh roboface` + robot_cli)에서 직접 제어할 때 둘 다 켬 |
 | 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임, agent vision 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |
 | 입 모양 ↔ 음량 임계 | `BehaviorConfig.mouth_amp_thresholds` | mouth.py/tts.py 공유 — [src/face/mouth.py](src/face/mouth.py) `shape_for_amp()` |
 | 표정 정의 | [src/face/expressions.py](src/face/expressions.py) `EXPRESSIONS_BY_NAME` | agent enum 자동 도출 |

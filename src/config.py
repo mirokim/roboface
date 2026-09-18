@@ -115,6 +115,10 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "claude").lower()
 # AGENT_DISABLED=1 → 자율 agent 루프 완전 정지 (외부에서 robot_cli/웹 UI로만
 # 제어할 때). LLM 백엔드/키 설정과 무관하게 최우선.
 AGENT_DISABLED = os.getenv("AGENT_DISABLED", "0") == "1"
+# SELF_TALK_DISABLED=1 → 자발적 혼잣말 전부 정지 (proactive 트리거 멘트 +
+# behavior_speaker.say 통로: 인사/wave_back/운세/recap/자세 잔소리 등).
+# 외부 명령(robot_cli speak)과 사용자 발화 응답엔 영향 없음.
+SELF_TALK_DISABLED = os.getenv("SELF_TALK_DISABLED", "0") == "1"
 
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
