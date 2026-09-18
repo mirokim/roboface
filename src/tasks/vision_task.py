@@ -175,19 +175,29 @@ async def run_vision(
         # pose 모드 점수는 매우 낮은 경우 많음 (HigherHRNet 특성). 너그럽게 0.05.
         person_filter_conf = 0.05 if VISION_MODE == "pose" else 0.5
 
+        _t_body = 0.0
+        _t_grab = 0.0
+        _t_hand = 0.0
+        _t_emo = 0.0
+        _t_face = 0.0
         async for detections in cam.stream():
-            # fps 카운터 — 매 _fps_log_every 프레임마다 처리 fps 출력
+            _body0 = time.monotonic()
+            # fps 카운터 — 매 _fps_log_every 프레임마다 처리 fps + 단계별 시간 출력
             _fps_frame_count += 1
             if _fps_frame_count >= _fps_log_every:
                 _now = time.time()
                 _elapsed = _now - _fps_window_start
                 if _elapsed > 0:
+                    n = _fps_frame_count
                     log.info(
-                        f"vision fps: {_fps_frame_count / _elapsed:.1f} "
-                        f"({_fps_frame_count}프레임 / {_elapsed:.1f}초)"
+                        f"vision fps: {n / _elapsed:.1f} ({n}프레임 / {_elapsed:.1f}초) "
+                        f"body={_t_body / n * 1000:.0f}ms grab={_t_grab / n * 1000:.0f} "
+                        f"hand={_t_hand / n * 1000:.0f} emo={_t_emo / n * 1000:.0f} "
+                        f"face={_t_face / n * 1000:.0f}"
                     )
                 _fps_frame_count = 0
                 _fps_window_start = _now
+                _t_body = _t_grab = _t_hand = _t_emo = _t_face = 0.0
 
             events = detector.process(detections)
             for ev in events:
@@ -451,7 +461,9 @@ async def run_vision(
             # 손 흔들기 + 표정 거울 + 얼굴 인식 — 사람이 보일 때, frame 1회 캡처
             if effective_bbox is not None:
                 try:
+                    _g0 = time.monotonic()
                     frame = cam.get_main_frame()
+                    _t_grab += time.monotonic() - _g0
                     # perception 공유 — agent vision이 이걸 가져다가 Claude로 보냄.
                     if perception is not None and frame is not None:
                         perception.last_frame = frame
@@ -547,10 +559,12 @@ async def run_vision(
                         rgb = _to_rgb(frame)
                         if rgb is not None:
                             ts_ms = int(time.time() * 1000)
+                            _h0 = time.monotonic()
                             try:
                                 gname, mp_wave = await asyncio.get_running_loop().run_in_executor(
                                     None, hand_gesture.process, rgb, ts_ms,
                                 )
+                                _t_hand += time.monotonic() - _h0
                             except Exception as e:
                                 log.debug(f"hand_gesture 에러: {e}")
                                 gname, mp_wave = None, False
@@ -572,9 +586,11 @@ async def run_vision(
                     if (emotion_mirror is not None and face is not None
                             and time.time() - last_emotion_at >= BEHAVIOR.emotion_interval_sec):
                         last_emotion_at = time.time()
+                        _e0 = time.monotonic()
                         emotion = await asyncio.get_running_loop().run_in_executor(
                             None, emotion_mirror.process, frame, effective_bbox,
                         )
+                        _t_emo += time.monotonic() - _e0
                         if emotion == EMOTION_SMILE:
                             from src.face.expressions import HAPPY
                             flash_expression(face, HAPPY, 1.5)
@@ -632,7 +648,9 @@ async def run_vision(
                                 face_memory._load_cache()
                             except Exception:
                                 pass
+                        _f0 = time.monotonic()
                         face_crop = detect_face_crop(frame, effective_bbox)
+                        _t_face += time.monotonic() - _f0
                         if face_crop is not None:
                             # 1) pending register 처리 우선
                             if ctx.pending_register_name:
@@ -774,6 +792,7 @@ async def run_vision(
                 last_distance_for_comment = None
                 if ctx is not None and ctx.user_name:
                     ctx.user_name = None
+            _t_body += time.monotonic() - _body0
     except asyncio.CancelledError:
         log.info("vision task 취소 요청")
         raise
