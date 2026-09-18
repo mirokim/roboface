@@ -177,15 +177,28 @@ def main() -> int:
         if not FACES_DB_PATH.exists():
             print(f"faces DB 없음: {FACES_DB_PATH}"); return 2
         conn = sqlite3.connect(str(FACES_DB_PATH))
-        try:
-            cur = conn.execute("UPDATE faces SET name=? WHERE name=?", (args.new, args.old))
-            conn.commit()
-        except sqlite3.IntegrityError:
-            print("이미 있는 이름"); return 1
-        if cur.rowcount == 0:
+        src = conn.execute("SELECT embedding, seen_count FROM faces WHERE name=?",
+                           (args.old,)).fetchone()
+        if src is None:
             print("없는 이름"); return 1
         thumbs = FACES_DB_PATH.parent / "faces"
         old_t = thumbs / f"{args.old}.jpg"
+        if conn.execute("SELECT 1 FROM faces WHERE name=?", (args.new,)).fetchone():
+            # 병합 — old 대표 임베딩+샘플을 new 샘플로, seen_count 합산
+            conn.execute("INSERT INTO face_samples (name, embedding, created_at) "
+                         "VALUES (?, ?, ?)", (args.new, src[0], time.time()))
+            conn.execute("UPDATE face_samples SET name=? WHERE name=?", (args.new, args.old))
+            conn.execute("UPDATE faces SET seen_count = seen_count + ? WHERE name=?",
+                         (int(src[1] or 0), args.new))
+            conn.execute("DELETE FROM faces WHERE name=?", (args.old,))
+            conn.commit()
+            if old_t.exists():
+                old_t.unlink()
+            print(f"merged {args.old} -> {args.new} (로봇은 30초 안에 반영)")
+            return 0
+        conn.execute("UPDATE faces SET name=? WHERE name=?", (args.new, args.old))
+        conn.execute("UPDATE face_samples SET name=? WHERE name=?", (args.new, args.old))
+        conn.commit()
         if old_t.exists():
             old_t.replace(thumbs / f"{args.new}.jpg")
         print(f"renamed {args.old} -> {args.new} (로봇은 30초 안에 반영)")

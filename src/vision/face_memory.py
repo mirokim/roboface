@@ -53,6 +53,9 @@ _AUTO_COUNT_THROTTLE_SEC = 10.0
 DEFAULT_OWNER_MIN_SEEN = 20
 # auto cluster name prefix — explicit register와 구분
 AUTO_NAME_PREFIX = "auto_"
+# 사람당 추가 샘플 상한 + 샘플로 채택하는 유사도 구간(임계 이상이지만 아직 낯선 각도)
+MAX_SAMPLES_PER_PERSON = 8
+SAMPLE_ADD_BELOW_SIM = 0.6
 
 _NAME_RE = re.compile(r"^[\w가-힣 .-]{1,32}$")
 
@@ -149,6 +152,16 @@ def _ensure_db(path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE faces ADD COLUMN seen_count INTEGER DEFAULT 1")
     except sqlite3.OperationalError:
         pass   # 이미 있음
+    # 사람당 추가 샘플(다른 각도/조명) — 매칭은 모든 샘플 중 최대 유사도
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS face_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_face_samples_name ON face_samples(name)")
     conn.commit()
     return conn
 
@@ -323,14 +336,24 @@ class FaceMemory:
         # auto_track 카운트 throttle용 — 마지막 카운트 시각 (DB last_seen_at은
         # recognize도 갱신해서 throttle 기준으로 직접 못 씀)
         self._last_counted_at: dict[str, float] = {}
+        n_people = 0
         for name, blob, last_seen in cur:
             try:
                 emb = _blob_to_embedding(blob)
                 self._cache.append((name, emb))
                 self._last_counted_at[name] = float(last_seen)
+                n_people += 1
             except Exception as e:
                 log.warning(f"face DB row '{name}' 로드 실패: {e}")
-        log.info(f"face_memory: {len(self._cache)}명 로드 (backend={backend_name()})")
+        self._sample_counts: dict[str, int] = {}
+        try:
+            for name, blob in self.conn.execute("SELECT name, embedding FROM face_samples"):
+                self._cache.append((name, _blob_to_embedding(blob)))
+                self._sample_counts[name] = self._sample_counts.get(name, 0) + 1
+        except Exception as e:
+            log.debug(f"face_samples 로드 실패: {e}")
+        log.info(f"face_memory: {n_people}명 / 샘플 {len(self._cache)}개 로드 "
+                 f"(backend={backend_name()})")
 
     def _best(self, emb: Any) -> tuple[str, float]:
         import numpy as np
@@ -410,14 +433,21 @@ class FaceMemory:
         new = new.strip()
         if not _NAME_RE.match(new) or new.startswith(AUTO_NAME_PREFIX):
             return False
-        try:
-            cur = self.conn.execute(
-                "UPDATE faces SET name=? WHERE name=?", (new, old),
-            )
-            self.conn.commit()
-            if cur.rowcount == 0:
-                return False
-        except sqlite3.IntegrityError:
+        if old == new:
+            return True
+        exists = self.conn.execute(
+            "SELECT 1 FROM faces WHERE name=?", (new,),
+        ).fetchone()
+        if exists:
+            return self.merge(old, new)
+        cur = self.conn.execute(
+            "UPDATE faces SET name=? WHERE name=?", (new, old),
+        )
+        self.conn.execute(
+            "UPDATE face_samples SET name=? WHERE name=?", (new, old),
+        )
+        self.conn.commit()
+        if cur.rowcount == 0:
             return False
         old_t, new_t = THUMBS_DIR / f"{old}.jpg", THUMBS_DIR / f"{new}.jpg"
         if old_t.exists():
@@ -429,8 +459,59 @@ class FaceMemory:
         log.info(f"face_memory: '{old}' → '{new}' 이름 변경")
         return True
 
+    def merge(self, src: str, dst: str) -> bool:
+        """src 클러스터를 dst로 흡수 — src 대표 임베딩+샘플을 dst 샘플로, seen_count 합산."""
+        row = self.conn.execute(
+            "SELECT embedding, seen_count FROM faces WHERE name=?", (src,),
+        ).fetchone()
+        if row is None or src == dst:
+            return False
+        if self.conn.execute("SELECT 1 FROM faces WHERE name=?", (dst,)).fetchone() is None:
+            return False
+        now = time.time()
+        self.conn.execute(
+            "INSERT INTO face_samples (name, embedding, created_at) VALUES (?, ?, ?)",
+            (dst, row[0], now),
+        )
+        self.conn.execute("UPDATE face_samples SET name=? WHERE name=?", (dst, src))
+        self.conn.execute(
+            "UPDATE faces SET seen_count = seen_count + ?, last_seen_at=? WHERE name=?",
+            (int(row[1] or 0), now, dst),
+        )
+        self.conn.execute("DELETE FROM faces WHERE name=?", (src,))
+        self.conn.commit()
+        t = THUMBS_DIR / f"{src}.jpg"
+        if t.exists():
+            try:
+                t.unlink()
+            except Exception:
+                pass
+        self._load_cache()
+        log.info(f"face_memory: '{src}' → '{dst}' 병합")
+        return True
+
+    def _maybe_add_sample(self, name: str, emb: Any, sim: float) -> None:
+        """매칭은 됐지만 낯선 각도(sim < SAMPLE_ADD_BELOW_SIM)면 샘플로 추가."""
+        if sim >= SAMPLE_ADD_BELOW_SIM:
+            return
+        if self._sample_counts.get(name, 0) >= MAX_SAMPLES_PER_PERSON:
+            return
+        try:
+            self.conn.execute(
+                "INSERT INTO face_samples (name, embedding, created_at) VALUES (?, ?, ?)",
+                (name, _embedding_to_blob(emb), time.time()),
+            )
+            self.conn.commit()
+            self._cache.append((name, emb))
+            self._sample_counts[name] = self._sample_counts.get(name, 0) + 1
+            log.info(f"face_memory: '{name}' 샘플 추가 (sim={sim:.2f}, "
+                     f"n={self._sample_counts[name]})")
+        except Exception as e:
+            log.debug(f"샘플 추가 실패: {e}")
+
     def delete(self, name: str) -> bool:
         cur = self.conn.execute("DELETE FROM faces WHERE name=?", (name,))
+        self.conn.execute("DELETE FROM face_samples WHERE name=?", (name,))
         self.conn.commit()
         t = THUMBS_DIR / f"{name}.jpg"
         if t.exists():
@@ -489,6 +570,7 @@ class FaceMemory:
                     self._last_counted_at[best_name] = now
                 except Exception as e:
                     log.warning(f"seen_count 업데이트 실패: {e}")
+                self._maybe_add_sample(best_name, emb, best_sim)
             cur = self.conn.execute(
                 "SELECT seen_count FROM faces WHERE name = ?", (best_name,),
             )
