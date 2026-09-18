@@ -245,6 +245,11 @@ class BehaviorConfig:
     # 1800s(30min): 무료 tier 1M calls/month 한참 안 깸 + 날씨 변화엔 충분히 빠름.
     weather_cache_sec: float = 1800.0
 
+    # head_tracker가 사람 bbox 중심을 프레임의 어느 높이에 둘지 (0=상단, 1=하단).
+    # 0.5면 얼굴만 가득 차서 손/몸통이 프레임 밖 → 손 흔들기 인식 불가. 0.38로
+    # 카메라를 살짝 내려 상체·손이 보이게 (2026-09-18).
+    head_track_target_y: float = 0.38
+
     # ambient STT — 이 peak(16-bit) 미만 발화는 Whisper에 안 보냄 (마이크 floor 가드).
     # CM421 사무실 환경 floor가 800~1500이라 400은 소음까지 통과시킴.
     ambient_min_peak: int = 1500

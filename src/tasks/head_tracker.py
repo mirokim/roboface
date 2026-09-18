@@ -19,6 +19,7 @@ import time
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext
 from src.config import (
+    BEHAVIOR,
     PAN_CENTER_DEG, PAN_MAX_DEG, PAN_MIN_DEG,
     TILT_CENTER_DEG, TILT_MAX_DEG, TILT_MIN_DEG,
 )
@@ -207,7 +208,7 @@ async def run_head_tracker(
 
                     # 새 타깃 계산 후 stable과 비교 (타깃 데드존)
                     ox = avg_cx - 0.5
-                    oy = avg_cy - 0.5
+                    oy = avg_cy - BEHAVIOR.head_track_target_y
                     if PAN_INVERT:
                         ox = -ox
                     if TILT_INVERT:
