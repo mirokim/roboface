@@ -64,12 +64,21 @@ def summarize_day(d: date | None = None) -> dict[str, Any]:
                     out[field] += 1
             elif speaker == "robot" and kind != "cli_speak":
                 out["robot_said"] += 1
-        w = conn.execute(
-            "SELECT COALESCE(SUM(COALESCE(duration_sec, ? - start_ts)), 0) AS t "
-            "FROM work_sessions WHERE start_ts >= ? AND start_ts < ?",
-            (min(time.time(), t1), t0, t1),
-        ).fetchone()
-        out["work_minutes"] = int((w["t"] or 0) / 60)
+        # 안 닫힌 세션(재시작/정전)은 다음 세션 시작까지로 잘라서 겹침 합산 방지
+        sess = conn.execute(
+            "SELECT start_ts, end_ts, duration_sec FROM work_sessions "
+            "WHERE start_ts >= ? AND start_ts < ? ORDER BY start_ts",
+            (t0, t1),
+        ).fetchall()
+        total = 0.0
+        for i, r in enumerate(sess):
+            start = float(r["start_ts"])
+            if r["end_ts"] is not None or r["duration_sec"] is not None:
+                total += float(r["duration_sec"] or (float(r["end_ts"]) - start))
+                continue
+            nxt = float(sess[i + 1]["start_ts"]) if i + 1 < len(sess) else min(time.time(), t1)
+            total += max(0.0, nxt - start)
+        out["work_minutes"] = int(total / 60)
     return out
 
 
