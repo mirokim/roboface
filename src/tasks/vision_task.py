@@ -142,6 +142,7 @@ async def run_vision(
     last_recognized: str | None = None
     last_recognize_at = 0.0
     last_face_reload_at = time.time()
+    last_face_match_at = 0.0
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
@@ -624,10 +625,17 @@ async def run_vision(
                                 #    생성. 가장 많이 본 cluster를 "주인"으로 승급.
                                 tracked = face_memory.auto_track(face_crop)
                                 if tracked is None:
-                                    last_recognized = None
-                                    if ctx.user_name:
-                                        ctx.user_name = None
+                                    # 한 번 못 알아봤다고 바로 잊지 않음 — 옆얼굴/블러로
+                                    # 2초에 한 번씩 튕기면 user_name이 깜빡이고 인사 반복.
+                                    # face_forget_sec 동안 연속 실패해야 클리어.
+                                    if (last_recognized is not None
+                                            and time.time() - last_face_match_at
+                                            > BEHAVIOR.face_forget_sec):
+                                        last_recognized = None
+                                        if ctx.user_name:
+                                            ctx.user_name = None
                                 else:
+                                    last_face_match_at = time.time()
                                     cluster_name, seen_count = tracked
                                     owner = face_memory.get_owner()
                                     # 표시 이름 결정:
