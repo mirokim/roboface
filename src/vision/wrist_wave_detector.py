@@ -61,7 +61,7 @@ class WristWaveDetector:
         # 2026-09-18: 0.62 → 0.45 — 사용자 실제 wave가 안 잡힘. 카메라 구도 수정으로
         # 손목 conf가 올라와 false + 여지는 줄었음.
         # 0.45는 작업 중 손동작이 5분마다 잡힘(0.45~0.54) → 0.52. 진짜 인사 실측 0.65.
-        min_amplitude_ratio: float = 0.52,
+        min_amplitude_ratio: float = 0.62,   # MediaPipe wave가 주 검출기 — 포즈는 큰 인사만 백업
         # 2 사이클 — 좌→우→좌→우→좌.
         min_zero_crossings: int = 5,
         max_zero_crossings: int = 16,
