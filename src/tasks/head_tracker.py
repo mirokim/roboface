@@ -57,7 +57,7 @@ OUTPUT_DEADZONE_DEG = 0.5
 SERVO_SETTLE_SEC = 0.0
 
 PAN_INVERT = True
-TILT_INVERT = True
+TILT_INVERT = False   # 2026-09-18 실측: tilt↑=카메라 아래. True였을 땐 사람이 아래 있으면 천장을 봄
 
 # === Breathing — 자연 호흡은 위아래만. PAN은 0으로 (갸우뚱 거슬림). ===
 # OFF (amp=0) — 머리+카메라가 한 덩어리라 tilt 진동이 bbox 흔들림 → 추적 떨림으로 증폭됐음.
