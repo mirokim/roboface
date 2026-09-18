@@ -25,6 +25,7 @@ from collections.abc import Callable
 
 from src.audio.fake_tts import speak as fake_speak
 from src.brain import memory
+from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import BEHAVIOR
 from src.face import expressions as expr
@@ -68,6 +69,8 @@ async def _execute(
     ctx: StateContext,
     servos: ServoController | None,
     emit_event: Callable[[SensorEvent], None] | None = None,
+    perception: PerceptionState | None = None,
+    get_session_id: Callable[[], int | None] | None = None,
 ) -> str:
     """단일 명령 실행. 성공 시 result 문자열 반환, 실패 시 raise."""
     if cmd == "speak":
@@ -138,13 +141,58 @@ async def _execute(
         return "blink"
 
     if cmd == "status":
-        return json.dumps({
+        # 원격 세션이 이미지 없이 1초 단위로 읽는 perception 요약.
+        # 값이 오래됐으면(stale_sec 초과) None — 원격이 stale 신호에 반응 안 하게.
+        now = time.time()
+        st: dict = {
             "state": ctx.state.value,
             "user_present": ctx.user_present,
             "expression": face.expression.name,
             "user_name": ctx.user_name,
             "brightness": face.brightness,
-        }, ensure_ascii=False)
+            "speech": face.speech_text if now < face.speech_until else None,
+        }
+        if perception is not None:
+            def _fresh(val, at, stale_sec=30.0):
+                return val if (val is not None and now - at < stale_sec) else None
+            st.update({
+                "person_present": perception.person_present,
+                "person_seen_ago_sec": (
+                    int(now - perception.last_person_seen_at)
+                    if perception.last_person_seen_at else None
+                ),
+                "distance_cm": (
+                    int(perception.person_distance_cm)
+                    if perception.person_distance_cm > 0 else None
+                ),
+                "emotion": _fresh(perception.current_emotion, perception.current_emotion_at),
+                "gaze": _fresh(perception.gaze_target, perception.gaze_target_at),
+                "activity": _fresh(perception.activity_level, perception.activity_level_at, 90.0),
+                "posture": _fresh(perception.posture_category, perception.posture_category_at, 90.0),
+                "head_pan": perception.head_pan_deg,
+                "head_tilt": perception.head_tilt_deg,
+                "temp_c": perception.temperature_c,
+                "user_spoke_ago_sec": (
+                    int(now - perception.last_user_speech_at)
+                    if getattr(perception, "last_user_speech_at", 0) else None
+                ),
+            })
+        sid = get_session_id() if get_session_id else None
+        if sid is not None:
+            try:
+                st["work_minutes"] = int(memory.current_work_duration(sid) / 60)
+            except Exception:
+                st["work_minutes"] = None
+        try:
+            recent = memory.recent_conversation(minutes=30.0, limit=4)
+            st["recent"] = [
+                {"role": r.get("speaker"), "kind": r.get("kind"),
+                 "text": (r.get("text") or "")[:60], "ago_sec": int(now - float(r.get("ts", now)))}
+                for r in recent
+            ]
+        except Exception:
+            pass
+        return json.dumps(st, ensure_ascii=False)
 
     if cmd == "gesture":
         kind = args.get("kind", "")
@@ -173,6 +221,8 @@ async def run(
     servos: ServoController | None = None,
     poll_interval_sec: float | None = None,
     emit_event: Callable[[SensorEvent], None] | None = None,
+    perception: PerceptionState | None = None,
+    get_session_id: Callable[[], int | None] | None = None,
 ) -> None:
     """주기적으로 pending 명령 처리.
 
@@ -193,7 +243,8 @@ async def run(
             try:
                 result = await _execute(
                     c["cmd"], c["args"], face, ctx, servos,
-                    emit_event=emit_event,
+                    emit_event=emit_event, perception=perception,
+                    get_session_id=get_session_id,
                 )
                 memory.mark_command_done(cmd_id, result)
                 log.info(f"명령 #{cmd_id} 완료: {c['cmd']} → {result[:60]}")

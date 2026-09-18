@@ -192,6 +192,8 @@ async def run_robot() -> None:
             command_executor.run(
                 face, ctx, servos=servos,
                 emit_event=lambda ev: sensors.events.append(ev),
+                perception=perception,
+                get_session_id=lambda: work_tracker.current_session_id,
             ),
             name="command_executor",
         ),
