@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import random
 from collections.abc import AsyncIterator, Callable, Coroutine
 from pathlib import Path
 from typing import Any
+import wave
 
 from src.brain import memory
 from src.config import BEHAVIOR
@@ -102,6 +104,30 @@ def _wav_peak(wav_bytes: bytes) -> int:
         return int(np.max(np.abs(np.frombuffer(pcm, dtype=np.int16))))
     except Exception:
         return 0
+
+
+def _speech_energy_ratio(wav_bytes: bytes, win_ms: int = 100) -> tuple[float, int]:
+    """100ms 창 RMS 프로파일에서 '활성 창' 비율과 개수.
+
+    활성 = RMS > max(3×floor, BEHAVIOR.ambient_active_rms). floor는 하위 20% 분위.
+    키보드/클릭 같은 짧은 burst는 활성 창이 1~3개, 실제 말은 수십 개 연속.
+    Whisper(CPU 1~2초) 돌리기 전 값싼 pre-gate.
+    """
+    try:
+        import numpy as np
+        w = wave.open(io.BytesIO(wav_bytes))
+        sr = w.getframerate()
+        a = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32)
+    except Exception:
+        return 1.0, 999   # 분석 실패 시 통과
+    win = max(1, sr * win_ms // 1000)
+    if len(a) < win * 3:
+        return 0.0, 0
+    prof = np.sqrt((a[: len(a) // win * win].reshape(-1, win) ** 2).mean(axis=1))
+    floor = float(np.percentile(prof, 20))
+    thr = max(3.0 * floor, float(BEHAVIOR.ambient_active_rms))
+    active = int((prof > thr).sum())
+    return active / len(prof), active
 
 
 def _normalize_wav_peak(
@@ -263,7 +289,14 @@ class WhisperVADStreamer:
             if wav_peak < BEHAVIOR.ambient_min_peak:
                 log.debug(f"utterance too quiet — skip (peak={wav_peak})")
                 continue
-            log.info(f"utterance → STT (peak={wav_peak}, {len(wav) // 32000}.{(len(wav) % 32000) // 3200}s)")
+            ratio, active = _speech_energy_ratio(wav)
+            if (ratio < BEHAVIOR.ambient_min_active_ratio
+                    or active < BEHAVIOR.ambient_min_active_windows):
+                log.debug(f"utterance not speech-like — skip (peak={wav_peak}, "
+                          f"active={active}, ratio={ratio:.2f})")
+                continue
+            log.info(f"utterance → STT (peak={wav_peak}, active={active}/{ratio:.2f}, "
+                     f"{len(wav) // 32000}.{(len(wav) % 32000) // 3200}s)")
             if AMBIENT_DEBUG_WAV:
                 try:
                     Path("/tmp/roboface_last_utt.wav").write_bytes(wav)

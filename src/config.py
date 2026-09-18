@@ -248,6 +248,12 @@ class BehaviorConfig:
     # ambient STT — 이 peak(16-bit) 미만 발화는 Whisper에 안 보냄 (마이크 floor 가드).
     # CM421 사무실 환경 floor가 800~1500이라 400은 소음까지 통과시킴.
     ambient_min_peak: int = 1500
+    # Whisper 전 pre-gate: 100ms 창 RMS가 max(3×floor, active_rms) 넘는 "활성 창"이
+    # 전체의 min_active_ratio 이상 + min_active_windows개 이상이어야 발화로 간주.
+    # 키보드/클릭 burst(활성 1~3창) 차단. 실제 말 2초면 활성 ~20창.
+    ambient_active_rms: int = 600
+    ambient_min_active_ratio: float = 0.2
+    ambient_min_active_windows: int = 5
 
     # 표정 스냅샷(face_snapshots) 보관 — 통계용 사진은 하루만 두고 계속 정리.
     # 얼굴 라이브러리(faces/ 썸네일)는 별도라 영향 없음.
