@@ -258,7 +258,7 @@ class BehaviorConfig:
     gaze_reply_speech_prob: float = 0.25
     gaze_reply_cooldown_sec: float = 300.0
     # 부팅/재시작 후 이 시간 안엔 인사류(reappear/face_recognize/new_face) 생략
-    boot_greeting_grace_sec: float = 45.0
+    boot_greeting_grace_sec: float = 90.0
     # 이름 있는 사람 인식 후 이 시간 안에 뜬 auto 클러스터(한 명일 때)는 그 사람으로 병합
     face_continuity_sec: float = 20.0
 
