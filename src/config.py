@@ -262,6 +262,10 @@ class BehaviorConfig:
     # 이름 있는 사람 인식 후 이 시간 안에 뜬 auto 클러스터(한 명일 때)는 그 사람으로 병합
     face_continuity_sec: float = 20.0
 
+    # IMX500 캡처 루프 목표 fps — 센서 FrameRate + 루프 period. 실제 fps는
+    # 캡처+후처리(HigherHRNet CPU 디코딩) 시간에 묶임. 로그 "camera capture+postprocess" 참조
+    vision_target_fps: float = 15.0
+
     # head_tracker가 사람 bbox 중심을 프레임의 어느 높이에 둘지 (0=상단, 1=하단).
     # 0.5면 얼굴만 가득 차서 손/몸통이 프레임 밖 → 손 흔들기 인식 불가. 0.38로
     # 카메라를 살짝 내려 상체·손이 보이게 (2026-09-18).

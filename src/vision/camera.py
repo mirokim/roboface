@@ -102,12 +102,15 @@ class IMX500Camera:
         self,
         model_path: str | None = None,
         confidence_threshold: float | None = None,
-        target_fps: float = 10.0,
+        target_fps: float | None = None,
         mode: str = "detect",
     ):
         # pose 모드 score는 매우 낮은 경우 많음 (HigherHRNet 특성). 일단 낮게.
         if confidence_threshold is None:
             confidence_threshold = 0.1 if mode == "pose" else 0.5
+        if target_fps is None:
+            from src.config import BEHAVIOR
+            target_fps = BEHAVIOR.vision_target_fps
         if mode not in ("detect", "pose"):
             raise ValueError(f"mode는 'detect' 또는 'pose' (got '{mode}')")
         if model_path is None:
@@ -296,15 +299,29 @@ class IMX500Camera:
         """비동기 감지 스트림. target_fps 간격으로 yield."""
         period = 1.0 / max(0.5, self.target_fps)
         loop = asyncio.get_event_loop()
+        # 캡처/후처리 시간 진단 — 20초마다 평균 (fps 병목 파악용)
+        cap_total = 0.0
+        cap_n = 0
+        last_diag = time.monotonic()
         while True:
+            t0 = time.monotonic()
             # 카메라 캡처는 blocking — executor에 던짐
             try:
                 detections = await loop.run_in_executor(None, self._get_detections)
             except Exception as e:
                 log.warning(f"detection 에러: {e}")
                 detections = []
+            elapsed = time.monotonic() - t0
+            cap_total += elapsed
+            cap_n += 1
+            if time.monotonic() - last_diag > 20.0:
+                log.info(f"camera capture+postprocess 평균 {cap_total / max(1, cap_n) * 1000:.0f}ms "
+                         f"(target period {period * 1000:.0f}ms)")
+                cap_total, cap_n, last_diag = 0.0, 0, time.monotonic()
             yield detections
-            await asyncio.sleep(period)
+            # period에서 이미 쓴 시간을 빼고 남은 만큼만 대기 (이전엔 통째로 sleep →
+            # 캡처 100ms + sleep 100ms = 5fps). 남은 시간이 없어도 0으로 양보.
+            await asyncio.sleep(max(0.0, period - elapsed))
 
     def get_main_frame(self):
         """현재 main stream의 raw RGB 프레임 (HxWx3 numpy uint8) 또는 None.
