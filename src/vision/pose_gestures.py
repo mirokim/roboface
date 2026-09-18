@@ -448,13 +448,22 @@ class GazeAtMeDetector:
         pitch_ratio = (float(nose[1]) - mid_eye_y) / eye_dist
         return pitch_ratio >= self.PITCH_RATIO_MIN
 
+    @property
+    def facing_now(self) -> bool:
+        """최근 ~1초 프레임 60% 이상 로봇을 향함 — 끄덕/도리 게이트용."""
+        if len(self.recent) < 3:
+            return False
+        tail = list(self.recent)[-5:]
+        return sum(tail) / len(tail) >= 0.6
+
     def process(self, keypoints: Any) -> bool:
         if keypoints is None:
             self.recent.clear()
             return False
+        # cooldown 중에도 facing 이력은 계속 쌓음 (facing_now가 stale 안 되게)
+        self.recent.append(self._is_facing(keypoints))
         if time.time() - self._last_at < self.cooldown_sec:
             return False
-        self.recent.append(self._is_facing(keypoints))
         if len(self.recent) < self.recent.maxlen:
             return False
         seq = list(self.recent)

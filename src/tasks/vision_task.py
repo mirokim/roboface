@@ -500,24 +500,32 @@ async def run_vision(
                                 perception.gaze_target_at = time.time()
                         # 머리/시선 관련 — 정면일 때만 의미 있음
                         if orientation == "front":
-                            if head_nod_detector is not None and head_nod_detector.process(
-                                last_keypoints,
-                            ):
-                                emit_event(SensorEvent(
-                                    type=SensorEventType.GESTURE_HEAD_NOD, data={},
-                                ))
-                            if head_shake_detector is not None and head_shake_detector.process(
-                                last_keypoints,
-                            ):
-                                emit_event(SensorEvent(
-                                    type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
-                                ))
                             if gaze_detector is not None and gaze_detector.process(
                                 last_keypoints,
                             ):
                                 emit_event(SensorEvent(
                                     type=SensorEventType.GAZE_AT_ME, data={},
                                 ))
+                            # 끄덕/도리는 로봇을 보고 있을 때만 의미 — 모니터 두 대
+                            # 사이로 고개 돌리는 걸 "도리도리"로 잡던 오탐 차단
+                            at_me = gaze_detector is None or gaze_detector.facing_now
+                            if at_me and head_nod_detector is not None and head_nod_detector.process(
+                                last_keypoints,
+                            ):
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GESTURE_HEAD_NOD, data={},
+                                ))
+                            if at_me and head_shake_detector is not None and head_shake_detector.process(
+                                last_keypoints,
+                            ):
+                                emit_event(SensorEvent(
+                                    type=SensorEventType.GESTURE_HEAD_SHAKE, data={},
+                                ))
+                            if not at_me:
+                                if head_nod_detector is not None:
+                                    head_nod_detector.reset()
+                                if head_shake_detector is not None:
+                                    head_shake_detector.reset()
                         else:
                             # 옆/뒤 — 머리 detector 상태 reset해서 다음 정면 복귀
                             # 시 깔끔히 다시 시작
