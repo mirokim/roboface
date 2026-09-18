@@ -115,6 +115,11 @@ def current_backend_label() -> str:
     """
     if LLM_BACKEND == "local":
         return "Qwen"
+    if LLM_BACKEND == "remote":
+        cli = _client
+        if isinstance(cli, _RemoteClient) and not cli._try_remote_first():
+            return "Qwen"
+        return "PC"
     if LLM_BACKEND == "hybrid":
         cli = _client
         if isinstance(cli, _HybridClient) and not cli._try_claude_first():
@@ -436,9 +441,61 @@ class _HybridClient:
         )
 
 
-# 백엔드 선택 — env LLM_BACKEND=local|claude|hybrid.
+class _RemoteClient:
+    """LAN PC(Ollama) 우선, 못 닿으면 로컬(llama-cpp)로 fallback. _HybridClient와 같은 패턴."""
+
+    _OFFLINE_TTL_SEC = 60.0
+
+    def __init__(self) -> None:
+        from src.brain.remote_llm import get_client as _gr
+        self._remote = _gr()
+        self._local: Any = None
+        self._offline_until = 0.0
+
+    def _get_local(self) -> Any:
+        if self._local is None:
+            from src.brain.local_llm import get_client as _gl
+            self._local = _gl()
+        return self._local
+
+    def _try_remote_first(self) -> bool:
+        return time.time() >= self._offline_until
+
+    def _mark_offline(self, reason: str) -> None:
+        self._offline_until = time.time() + self._OFFLINE_TTL_SEC
+        log.warning(f"PC LLM 안 닿음 → 로컬 fallback ({self._OFFLINE_TTL_SEC:.0f}s): {reason}")
+
+    def generate(self, user_prompt: str, **kw) -> str:
+        from src.brain.remote_llm import RemoteUnavailable
+        if self._try_remote_first():
+            try:
+                return self._remote.generate(user_prompt, **kw)
+            except RemoteUnavailable as e:
+                self._mark_offline(str(e))
+            except Exception as e:
+                log.warning(f"원격 LLM generate 실패: {e}")
+                return ""
+        return self._get_local().generate(user_prompt, **kw)
+
+    def generate_with_tools(self, user_prompt: str, tools: list[dict], **kw):
+        from src.brain.remote_llm import RemoteUnavailable
+        if self._try_remote_first():
+            try:
+                return self._remote.generate_with_tools(user_prompt, tools, **kw)
+            except RemoteUnavailable as e:
+                self._mark_offline(str(e))
+            except Exception as e:
+                log.warning(f"원격 LLM tool 호출 실패: {e}")
+                return [], []
+        return self._get_local().generate_with_tools(user_prompt, tools, **kw)
+
+
+# 백엔드 선택 — env LLM_BACKEND=local|claude|hybrid|remote.
 # 모두 generate / generate_with_tools 동일 인터페이스라 swap 가능.
-if LLM_BACKEND == "local":
+if LLM_BACKEND == "remote":
+    _client = _RemoteClient()  # type: ignore[assignment]
+    log.info("LLM backend: remote (PC Ollama + 로컬 fallback)")
+elif LLM_BACKEND == "local":
     from src.brain.local_llm import get_client as _get_local_client
     _client = _get_local_client()  # type: ignore[assignment]
     log.info(f"LLM backend: local (Qwen GGUF)")

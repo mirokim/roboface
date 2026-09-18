@@ -118,6 +118,11 @@ WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비
 # "local"  → llama-cpp-python + GGUF 모델 (오프라인, 비용 0)
 # 봇 setup이 모델 다운로드 + .env에 LLM_BACKEND=local 설정.
 LLM_BACKEND = os.getenv("LLM_BACKEND", "claude").lower()
+# "remote" → LAN의 PC에서 도는 Ollama(OpenAI 호환) 호출, 안 닿으면 로컬 fallback.
+# PC 이름(mDNS)으로 두면 DHCP로 IP 바뀌어도 OK. 방화벽 11434 허용 필요.
+LLM_REMOTE_URL = os.getenv("LLM_REMOTE_URL", "http://JH_1.local:11434/v1")
+LLM_REMOTE_MODEL = os.getenv("LLM_REMOTE_MODEL", "qwen2.5:7b")
+LLM_REMOTE_VISION = os.getenv("LLM_REMOTE_VISION", "0") == "1"
 # AGENT_DISABLED=1 → 자율 agent 루프 완전 정지 (외부에서 robot_cli/웹 UI로만
 # 제어할 때). LLM 백엔드/키 설정과 무관하게 최우선.
 AGENT_DISABLED = os.getenv("AGENT_DISABLED", "0") == "1"

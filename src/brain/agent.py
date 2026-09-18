@@ -40,7 +40,7 @@ from src.config import (
 # 로컬로 빠짐). 게이트 모두 이 플래그로 통일.
 LLM_AVAILABLE = (
     not AGENT_DISABLED
-    and (LLM_BACKEND in ("local", "hybrid") or bool(ANTHROPIC_API_KEY))
+    and (LLM_BACKEND in ("local", "hybrid", "remote") or bool(ANTHROPIC_API_KEY))
 )
 
 # mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
@@ -1090,8 +1090,13 @@ class RobotAgent:
         if not BEHAVIOR.agent_vision_enabled:
             return None
         # 로컬 백엔드(Qwen2.5-3B)는 vision 미지원 — 첨부해도 의미 없음.
+        # remote는 LLM_REMOTE_VISION=1(vision 모델)일 때만.
         if LLM_BACKEND == "local":
             return None
+        if LLM_BACKEND == "remote":
+            from src.config import LLM_REMOTE_VISION
+            if not LLM_REMOTE_VISION:
+                return None
         if self.perception is None or self.perception.last_frame is None:
             return None
         now = time.time()
