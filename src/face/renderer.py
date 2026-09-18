@@ -123,6 +123,7 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     now = time.time()
     eyes.update_blink(face.eye_state, now)
     eyes.update_saccade(face.eye_state, now)
+    eyes.update_params(face.eye_state)
 
     bg = tuple(int(c * face.brightness) for c in COLOR_BG)
     canvas.fill(bg)
@@ -130,19 +131,11 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     # 추울 때 떨림 오프셋 — 얼굴 전체에 적용
     sh_dx, sh_dy = extras.shiver_offset(face.shiver_intensity, now)
 
-    # === 얼굴 위치 동적 계산 ===
-    eye_size = 56
-    eye_offset = int(DISPLAY_WIDTH * 0.20)
-
-    eye_extent_above = eye_size // 2
-    eye_extent_below = eyes.eye_extent_below(face.expression.eye, eye_size)
-    gap = max(eye_extent_below, eye_size // 3) + 10
-    mouth_estimated_below = 12
-
-    face_block_height = eye_extent_above + gap + mouth_estimated_below
-    face_top = (DISPLAY_HEIGHT - face_block_height) // 2
-    eye_y = face_top + eye_extent_above
-    mouth_y = eye_y + gap
+    # === 얼굴 레이아웃 — 큰 치비 눈 기준 고정 ===
+    eye_size = 96                              # 눈 높이(px)
+    eye_offset = int(DISPLAY_WIDTH * 0.20)     # 중심에서 좌우 거리
+    eye_y = 98
+    mouth_y = 186
 
     # 말풍선 떠 있어도 얼굴 위치는 고정 — 위쪽에 덮어 그림
     speech_active = face.speech_text and now < face.speech_until
@@ -153,7 +146,7 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     eyes.draw_eyes(canvas, face.eye_state, left_eye, right_eye, size=eye_size)
 
     mouth_center = (DISPLAY_WIDTH // 2 + sh_dx, mouth_y + sh_dy)
-    mouth.draw_mouth(canvas, face.mouth_state, mouth_center, width=50)
+    mouth.draw_mouth(canvas, face.mouth_state, mouth_center, width=72)
 
     # 땀방울
     if face.sweat_intensity > 0.05:

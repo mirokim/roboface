@@ -36,12 +36,16 @@ FPS = 30
 # 그리기 선 두께 — 모든 얼굴 요소에 일관 적용
 LINE_THICK = 4
 
-# === 색상 (RGB) — 순수 모노톤 (검정 + 흰색) ===
+# === 색상 (RGB) — 치비 애니 스타일 (검정 배경 + 흰 공막 + 하늘색 홍채) ===
 COLOR_BG = (0, 0, 0)             # 검정
-COLOR_EYE = (255, 255, 255)      # 흰색
-COLOR_EYE_DARK = (60, 60, 60)    # 미사용
-COLOR_MOUTH = (255, 255, 255)    # 흰색
-COLOR_BLUSH = (200, 200, 200)    # 옅은 회색 (거의 안 보일 정도)
+COLOR_EYE = (255, 255, 255)      # 공막/선 흰색
+COLOR_IRIS = (110, 195, 255)     # 하늘색 홍채
+COLOR_PUPIL = (18, 24, 40)       # 거의 검정 동공
+COLOR_HIGHLIGHT = (255, 255, 255)
+COLOR_BROW = (255, 255, 255)     # 눈썹
+COLOR_MOUTH = (255, 255, 255)    # 입 선
+COLOR_MOUTH_INNER = (170, 50, 80)  # 벌린 입 안쪽
+COLOR_BLUSH = (255, 120, 150)    # 핑크 볼터치
 COLOR_INDICATOR_REC = (255, 100, 100)  # 녹음 인디케이터만 빨강
 
 # === LCD 핀 (Pi 5 BCM) — robot 모드에서만 의미있음 ===

@@ -1,13 +1,13 @@
-"""입 그리기 — 단순한 선 기반 (모든 모양 일관된 두께)."""
+"""입 그리기 — 치비 스타일. 선 입 + 속 채운 벌린 입."""
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import pygame
+import pygame.gfxdraw
 
-from src.config import BEHAVIOR, COLOR_BG, COLOR_MOUTH, LINE_THICK
+from src.config import BEHAVIOR, COLOR_BG, COLOR_MOUTH, COLOR_MOUTH_INNER, LINE_THICK
 from src.face.expressions import MouthShape
 from src.face.eyes import clean_arc
 
@@ -36,52 +36,58 @@ def update_talking(state: MouthState, audio_rms: float, now: float) -> None:
     state.shape = shape_for_amp(state.talk_amplitude)
 
 
+def _filled_ellipse_outlined(surface, rect: pygame.Rect, inner, outline, thick: int) -> None:
+    """속 색 + 외곽선 타원."""
+    pygame.draw.ellipse(surface, outline, rect)
+    in_rect = rect.inflate(-2 * thick, -2 * thick)
+    if in_rect.width > 0 and in_rect.height > 0:
+        pygame.draw.ellipse(surface, inner, in_rect)
+
+
+def _open_smile(surface, center, w: int, h: int) -> None:
+    """활짝 벌린 웃는 입 — 아래쪽 반타원 속 채움 + 흰 외곽선 + 윗선."""
+    cx, cy = center
+    rect = pygame.Rect(cx - w // 2, cy - h, w, 2 * h)
+    _filled_ellipse_outlined(surface, rect, COLOR_MOUTH_INNER, COLOR_MOUTH, LINE_THICK)
+    # 윗반쪽 마스킹 → 반타원
+    pygame.draw.rect(surface, COLOR_BG, pygame.Rect(rect.left - 4, rect.top - 4, rect.width + 8, h + 4))
+    pygame.draw.line(surface, COLOR_MOUTH, (rect.left + 1, cy), (rect.right - 2, cy), LINE_THICK)
+
+
 def draw_mouth(
     surface: pygame.Surface,
     state: MouthState,
     center: tuple[int, int],
     width: int = 50,
 ) -> None:
-    """입 그리기 — 단순한 호/선."""
     cx, cy = center
     s = state.shape
 
     if s in (MouthShape.NEUTRAL, MouthShape.SMILE):
-        # 미소 호 — SMILE은 더 큰 호
-        scale = 0.8 if s == MouthShape.SMILE else 0.55
+        scale = 0.85 if s == MouthShape.SMILE else 0.55
         w = int(width * scale)
         h = int(width * scale * 0.7)
         rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
         clean_arc(surface, rect, COLOR_MOUTH, upper=False)
     elif s == MouthShape.GRIN:
-        w = int(width * 0.95)
-        h = int(width * 0.6)
-        rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
-        clean_arc(surface, rect, COLOR_MOUTH, upper=False)
+        _open_smile(surface, center, int(width * 1.0), int(width * 0.45))
     elif s == MouthShape.SAD:
-        w = int(width * 0.6)
-        h = int(width * 0.55)
-        rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
+        w = int(width * 0.55)
+        h = int(width * 0.5)
+        rect = pygame.Rect(cx - w // 2, cy - h // 2 + 4, w, h)
         clean_arc(surface, rect, COLOR_MOUTH, upper=True)
     elif s == MouthShape.O:
-        size = max(8, int(width * 0.3))
-        rect = pygame.Rect(cx - size // 2, cy - size // 2, size, size)
-        # 깔끔한 링: 외곽 채움 → 내부 펀칭
-        pygame.draw.ellipse(surface, COLOR_MOUTH, rect)
-        inner = rect.inflate(-2 * LINE_THICK, -2 * LINE_THICK)
-        if inner.width > 0:
-            pygame.draw.ellipse(surface, COLOR_BG, inner)
+        size = max(14, int(width * 0.38))
+        rect = pygame.Rect(cx - size // 2, cy - size // 2, size, int(size * 1.15))
+        _filled_ellipse_outlined(surface, rect, COLOR_MOUTH_INNER, COLOR_MOUTH, LINE_THICK)
     elif s == MouthShape.BIG_O:
-        size = max(12, int(width * 0.55))
-        rect = pygame.Rect(cx - size // 2, cy - size // 2, size, size)
-        pygame.draw.ellipse(surface, COLOR_MOUTH, rect)
-        inner = rect.inflate(-2 * LINE_THICK, -2 * LINE_THICK)
-        if inner.width > 0:
-            pygame.draw.ellipse(surface, COLOR_BG, inner)
+        w = max(14, int(width * 0.55))
+        h = int(w * 1.25)
+        rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
+        _filled_ellipse_outlined(surface, rect, COLOR_MOUTH_INNER, COLOR_MOUTH, LINE_THICK)
     elif s == MouthShape.WAVY:
-        # 물결 — 4번 꺾이는 지그재그 라인
-        w = int(width * 0.55)
-        amp = max(2, width // 14)
+        w = int(width * 0.7)
+        amp = max(3, width // 10)
         x0 = cx - w // 2
         seg = w // 4
         pts = [
@@ -95,12 +101,12 @@ def draw_mouth(
     elif s == MouthShape.FLAT:
         pygame.draw.line(
             surface, COLOR_MOUTH,
-            (cx - width // 5, cy), (cx + width // 5, cy),
+            (cx - width // 4, cy), (cx + width // 4, cy),
             LINE_THICK,
         )
     elif s in (MouthShape.OPEN_SMALL, MouthShape.OPEN_MID, MouthShape.OPEN_LARGE):
         amp = max(0.15, state.talk_amplitude)
-        h = int(width * 0.15 + width * 0.35 * amp)
-        w = int(width * 0.4 + width * 0.2 * amp)
+        h = int(width * 0.12 + width * 0.4 * amp)
+        w = int(width * 0.45 + width * 0.3 * amp)
         rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
-        pygame.draw.ellipse(surface, COLOR_MOUTH, rect)
+        _filled_ellipse_outlined(surface, rect, COLOR_MOUTH_INNER, COLOR_MOUTH, LINE_THICK)

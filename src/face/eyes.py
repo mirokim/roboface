@@ -1,26 +1,33 @@
-"""눈 그리기 — 깔끔한 Stack-chan 정통 스타일.
+"""눈 그리기 — 치비 애니메이션 스타일 (Simi & Chapchap 느낌).
 
-원칙:
-- 모든 "뜬 눈"은 같은 채워진 타원, 모양은 비율/크기로만 차이
-- 추가 요소(눈썹/하이라이트/동공) 없음
-- 모든 선 두께는 LINE_THICK 일관
+구조:
+- 공막(흰 세로 타원) 안에 큰 홍채 + 작은 동공 + 하이라이트 2개
+- 표정은 "모양 교체"가 아니라 **눈꺼풀 파라미터**(상/하 높이, 기울기, 동공/눈 크기,
+  눈썹)로 표현 → 매 프레임 lerp로 부드럽게 전환 (EyeParams)
+- ^^ / >< / ♥ / ★ / @ 같은 특수 모양은 별도 드로잉 유지 (전환 시 깜빡임이 가려줌)
+- 깜빡임은 윗눈꺼풀이 내려오는 것으로 통합 (blink → lid_top override)
 """
 
 from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pygame
 import pygame.gfxdraw
 
-from src.config import BEHAVIOR, COLOR_BG, COLOR_EYE, LINE_THICK
+from src.config import (
+    BEHAVIOR, COLOR_BG, COLOR_BLUSH, COLOR_BROW, COLOR_EYE, COLOR_HIGHLIGHT,
+    COLOR_IRIS, COLOR_PUPIL, LINE_THICK,
+)
 from src.face.expressions import EyeShape
 
 
 def _aa_filled_circle(surface: pygame.Surface, x: int, y: int, r: int, color) -> None:
     """안티앨리어싱된 채워진 원 — gfxdraw 두 함수 조합."""
+    if r <= 0:
+        return
     pygame.gfxdraw.filled_circle(surface, x, y, r, color)
     pygame.gfxdraw.aacircle(surface, x, y, r, color)
 
@@ -29,6 +36,67 @@ def _aa_filled_polygon(surface: pygame.Surface, pts, color) -> None:
     """안티앨리어싱된 채워진 폴리곤."""
     pygame.gfxdraw.filled_polygon(surface, pts, color)
     pygame.gfxdraw.aapolygon(surface, pts, color)
+
+
+def _aa_filled_ellipse(surface: pygame.Surface, cx: int, cy: int, rx: int, ry: int, color) -> None:
+    if rx <= 0 or ry <= 0:
+        return
+    pygame.gfxdraw.filled_ellipse(surface, cx, cy, rx, ry, color)
+    pygame.gfxdraw.aaellipse(surface, cx, cy, rx, ry, color)
+
+
+# ─── 눈꺼풀/동공 파라미터 (표정 SSOT — 타원 계열 눈에만 적용) ───
+
+@dataclass
+class EyeParams:
+    """타원 눈 한 세트의 연속 파라미터. 모두 lerp 가능."""
+
+    lid_top: float = 0.0      # 윗눈꺼풀이 덮는 비율 0~1
+    lid_bot: float = 0.0      # 아랫눈꺼풀이 덮는 비율 0~1
+    lid_tilt: float = 0.0     # 윗눈꺼풀 기울기(deg). +면 안쪽이 내려감(화남), -면 바깥쪽(걱정)
+    eye_scale: float = 1.0    # 공막 크기 배율
+    pupil_scale: float = 1.0  # 동공 크기 배율 (놀람=작게)
+    iris_scale: float = 1.0   # 홍채 크기 배율
+    brow: float = 0.0         # 눈썹 표시 강도 0~1
+    brow_tilt: float = 0.0    # 눈썹 기울기(deg). +면 안쪽이 내려감(화남)
+    brow_lift: float = 0.0    # 눈썹 높이 오프셋(px, +면 위로)
+    blush: float = 0.0        # 볼터치 강도 0~1
+
+    def lerp_toward(self, target: "EyeParams", t: float) -> None:
+        for k in self.__dataclass_fields__:
+            cur = getattr(self, k)
+            setattr(self, k, cur + (getattr(target, k) - cur) * t)
+
+
+_PARAMS: dict[EyeShape, EyeParams] = {
+    EyeShape.NORMAL:    EyeParams(),
+    EyeShape.SURPRISED: EyeParams(eye_scale=1.12, pupil_scale=0.45, iris_scale=0.85,
+                                  brow=1.0, brow_lift=2),
+    EyeShape.SLEEPY:    EyeParams(lid_top=0.55, lid_bot=0.12, pupil_scale=0.9),
+    EyeShape.WORRIED:   EyeParams(lid_top=0.22, lid_tilt=-18, eye_scale=0.95,
+                                  pupil_scale=0.85, brow=1.0, brow_tilt=-22, brow_lift=4),
+    EyeShape.ANGRY:     EyeParams(lid_top=0.38, lid_tilt=26, pupil_scale=0.8,
+                                  brow=1.0, brow_tilt=28, brow_lift=-2),
+    # 특수 모양(아래)은 타원 파라미터를 안 쓰지만 blush/brow 등 보조 요소는 참조.
+    EyeShape.HAPPY:     EyeParams(blush=1.0),
+    EyeShape.SQUINT:    EyeParams(blush=1.0),
+    EyeShape.LOVE:      EyeParams(blush=1.0),
+    EyeShape.STAR:      EyeParams(blush=0.6),
+    EyeShape.DIZZY:     EyeParams(),
+    EyeShape.WINK_LEFT: EyeParams(blush=0.7),
+    EyeShape.WINK_RIGHT: EyeParams(blush=0.7),
+    EyeShape.CLOSED:    EyeParams(lid_top=1.0),
+}
+
+# 파라미터 전환 속도 (0~1, 프레임당). 30fps 기준 ~0.2s에 90% 도달.
+PARAM_BLEND = 0.22
+
+# 타원 눈(눈꺼풀 시스템으로 그리는 모양)
+_ELLIPSE_SHAPES = {
+    EyeShape.NORMAL, EyeShape.SURPRISED, EyeShape.SLEEPY,
+    EyeShape.WORRIED, EyeShape.ANGRY, EyeShape.CLOSED,
+    EyeShape.WINK_LEFT, EyeShape.WINK_RIGHT,
+}
 
 
 @dataclass
@@ -42,8 +110,10 @@ class EyeState:
     _next_blink_at: float = 0.0
     _blinking_since: float | None = None
 
+    # 연속 파라미터 (shape에서 도출된 target으로 매 프레임 lerp)
+    params: EyeParams = field(default_factory=EyeParams)
+
     # === Micro-saccades — 사람 눈은 절대 고정되지 않음 ===
-    # gaze_x/y는 "의도된 시선"이고, saccade_x/y는 그 위에 더해지는 미세 흔들림.
     saccade_x: float = 0.0
     saccade_y: float = 0.0
     _saccade_target_x: float = 0.0
@@ -52,29 +122,14 @@ class EyeState:
 
 
 def eye_extent_below(shape: EyeShape, size: int) -> int:
-    """현재 눈 모양이 중심에서 얼마나 아래로 뻗는지 (px).
-
-    렌더러가 입 위치 결정할 때 사용 — 표정마다 눈 실제 크기가 달라서.
-    """
-    if shape in (EyeShape.SQUINT, EyeShape.ANGRY):
-        return size // 4               # 꺾인 선, size/4
+    """현재 눈 모양이 중심에서 얼마나 아래로 뻗는지 (px). 렌더러 레이아웃용."""
     if shape == EyeShape.HAPPY:
-        return int(size * 0.45)        # 호의 아래 끝
-    if shape == EyeShape.SLEEPY:
-        return int(size * 0.18)
-    if shape == EyeShape.WORRIED:
-        return int(4 + size * 0.75 / 2)
-    if shape == EyeShape.SURPRISED:
-        return int(size * 1.15 / 2)
-    if shape == EyeShape.LOVE:
-        return size // 2 + size // 6   # 하트 하단 삼각형
-    if shape in (EyeShape.STAR, EyeShape.DIZZY):
-        return size // 2
+        return int(size * 0.30)
+    if shape == EyeShape.SQUINT:
+        return int(size * 0.25)
     if shape == EyeShape.CLOSED:
-        return 0
-    if shape in (EyeShape.WINK_LEFT, EyeShape.WINK_RIGHT):
-        return size // 2               # 한 쪽이 떴으니 보통 크기 유지
-    return size // 2                   # NORMAL 등 기본 타원
+        return int(size * 0.1)
+    return size // 2
 
 
 def schedule_next_blink(state: EyeState, now: float) -> None:
@@ -108,14 +163,18 @@ def trigger_blink(state: EyeState, now: float) -> None:
     state._blinking_since = now
 
 
-# ─── Micro-saccades — 매 프레임 시선에 미세 흔들림 ───
-# 100~350ms마다 새 saccade 타겟 고름 → 그 사이는 부드럽게 보간.
-# 진폭 ±0.04 (gaze 단위) — 화면상 약 ±2px. 거의 안 보이지만 살아있는 느낌 결정적.
+def update_params(state: EyeState) -> None:
+    """매 렌더 프레임 — shape 목표 파라미터로 부드럽게 수렴."""
+    target = _PARAMS.get(state.shape) or _PARAMS[EyeShape.NORMAL]
+    state.params.lerp_toward(target, PARAM_BLEND)
+
+
+# ─── Micro-saccades ───
 SACCADE_AMP_X = 0.04
 SACCADE_AMP_Y = 0.025
 SACCADE_INTERVAL_MIN = 0.10
 SACCADE_INTERVAL_MAX = 0.35
-SACCADE_BLEND = 0.35   # 보간 속도 (0~1, 클수록 빠르게 따라감)
+SACCADE_BLEND = 0.35
 
 
 def update_saccade(state: EyeState, now: float) -> None:
@@ -130,9 +189,7 @@ def update_saccade(state: EyeState, now: float) -> None:
     state.saccade_y += (state._saccade_target_y - state.saccade_y) * SACCADE_BLEND
 
 
-# ─── 깔끔한 두꺼운 호 그리기 ───
-# pygame.draw.arc()는 두께 4+에서 픽셀 거칠어짐.
-# 대신 외곽 채움 → 내부 펀칭 → 반쪽 마스킹 기법 사용.
+# ─── 깔끔한 두꺼운 호 그리기 (mouth.py도 공유) ───
 
 def clean_arc(
     surface: pygame.Surface,
@@ -149,7 +206,6 @@ def clean_arc(
     inner = rect.inflate(-2 * thickness, -2 * thickness)
     if inner.width > 0 and inner.height > 0:
         pygame.draw.ellipse(surface, COLOR_BG, inner)
-    # 반쪽 마스킹
     cy = rect.centery
     if upper:
         mask = pygame.Rect(
@@ -171,122 +227,195 @@ def draw_eyes(
     right_center: tuple[int, int],
     size: int = 50,
 ) -> None:
-    """양쪽 눈 그리기."""
-    open_ratio = 1.0 - state.blink
+    """양쪽 눈 그리기. size = 눈 높이(px)."""
+    p = state.params
+    shape = state.shape
 
-    if state.shape == EyeShape.CLOSED or open_ratio < 0.05:
-        _line(surface, left_center, size)
-        _line(surface, right_center, size)
-        return
+    # 볼터치 — 눈 아래 바깥쪽. 눈꺼풀 폴리곤이 덮지 않도록 눈 먼저? 아니,
+    # 눈꺼풀은 BG색 폴리곤이라 blush를 덮을 수 있어 blush는 마지막에 그림.
+    gx = (state.gaze_x + state.saccade_x)
+    gy = (state.gaze_y + state.saccade_y)
 
-    # 윙크: 한쪽만 감음
-    if state.shape == EyeShape.WINK_LEFT:
-        _line(surface, left_center, size)
-        _ellipse(surface, right_center, size, open_ratio, scale=1.0)
-        return
-    if state.shape == EyeShape.WINK_RIGHT:
-        _ellipse(surface, left_center, size, open_ratio, scale=1.0)
-        _line(surface, right_center, size)
-        return
+    if shape in _ELLIPSE_SHAPES:
+        left_closed = shape == EyeShape.WINK_LEFT
+        right_closed = shape == EyeShape.WINK_RIGHT
+        _draw_ellipse_eye(surface, left_center, size, p, gx, gy,
+                          inner_sign=+1, force_closed=left_closed, blink=state.blink)
+        _draw_ellipse_eye(surface, right_center, size, p, gx, gy,
+                          inner_sign=-1, force_closed=right_closed, blink=state.blink)
+    else:
+        # 특수 모양 — 깜빡임 중엔 감긴 선으로
+        closed = state.blink > 0.6
+        for center, inner_sign in ((left_center, +1), (right_center, -1)):
+            if closed:
+                _closed_line(surface, center, size, p, inner_sign)
+                continue
+            if shape == EyeShape.HAPPY:
+                _arc_up(surface, center, size)
+            elif shape == EyeShape.SQUINT:
+                _angle(surface, center, size, point_right=(inner_sign > 0))
+            elif shape == EyeShape.LOVE:
+                _heart(surface, center, size)
+            elif shape == EyeShape.STAR:
+                _star(surface, center, size)
+            elif shape == EyeShape.DIZZY:
+                _dizzy(surface, center, size)
+            else:
+                _arc_up(surface, center, size)
 
-    # 하트
-    if state.shape == EyeShape.LOVE:
-        _heart(surface, left_center, size)
-        _heart(surface, right_center, size)
-        return
+    # 눈썹
+    if p.brow > 0.05:
+        _brow(surface, left_center, size, p, inner_sign=+1)
+        _brow(surface, right_center, size, p, inner_sign=-1)
 
-    # 별
-    if state.shape == EyeShape.STAR:
-        _star(surface, left_center, size)
-        _star(surface, right_center, size)
-        return
-
-    # 어지러움 (소용돌이)
-    if state.shape == EyeShape.DIZZY:
-        _dizzy(surface, left_center, size)
-        _dizzy(surface, right_center, size)
-        return
-
-    # 라인 표정 (^^, >_<, ><)
-    if state.shape == EyeShape.HAPPY:
-        _arc_up(surface, left_center, size)
-        _arc_up(surface, right_center, size)
-        return
-    if state.shape == EyeShape.SQUINT:
-        _angle(surface, left_center, size, point_right=True)
-        _angle(surface, right_center, size, point_right=False)
-        return
-    if state.shape == EyeShape.ANGRY:
-        _angle(surface, left_center, size, point_right=False)  # 바깥쪽으로 (찡그림)
-        _angle(surface, right_center, size, point_right=True)
-        return
-
-    # 채워진 타원 — 크기/비율만 다름. 시선 + 미세 saccade.
-    gx = int((state.gaze_x + state.saccade_x) * 6)
-    gy = int((state.gaze_y + state.saccade_y) * 4)
-    if state.shape == EyeShape.SURPRISED:
-        _ellipse(surface, left_center, size, open_ratio, scale=1.15, offset_x=gx, offset_y=gy)
-        _ellipse(surface, right_center, size, open_ratio, scale=1.15, offset_x=gx, offset_y=gy)
-    elif state.shape == EyeShape.SLEEPY:
-        _ellipse(surface, left_center, size, open_ratio * 0.35, scale=1.0, offset_x=gx)
-        _ellipse(surface, right_center, size, open_ratio * 0.35, scale=1.0, offset_x=gx)
-    elif state.shape == EyeShape.WORRIED:
-        _ellipse(surface, left_center, size, open_ratio, scale=0.75, offset_x=gx, offset_y=4 + gy)
-        _ellipse(surface, right_center, size, open_ratio, scale=0.75, offset_x=gx, offset_y=4 + gy)
-    else:  # NORMAL 등
-        _ellipse(surface, left_center, size, open_ratio, scale=1.0, offset_x=gx, offset_y=gy)
-        _ellipse(surface, right_center, size, open_ratio, scale=1.0, offset_x=gx, offset_y=gy)
+    # 볼터치
+    if p.blush > 0.05:
+        _blush(surface, left_center, size, p.blush, inner_sign=+1)
+        _blush(surface, right_center, size, p.blush, inner_sign=-1)
 
 
-# ─── 헬퍼 (각 모양마다 함수 하나, 단순하게) ───
-
-def _ellipse(
+def _draw_ellipse_eye(
     surface: pygame.Surface,
     center: tuple[int, int],
-    base_size: int,
-    open_ratio: float,
-    scale: float = 1.0,
-    offset_x: int = 0,
-    offset_y: int = 0,
+    size: int,
+    p: EyeParams,
+    gx: float,
+    gy: float,
+    *,
+    inner_sign: int,
+    force_closed: bool,
+    blink: float,
 ) -> None:
-    """채워진 타원. 깜빡임은 height 압축으로. gaze는 offset으로."""
-    w = int(base_size * scale)
-    h = max(2, int(base_size * scale * open_ratio))
-    rect = pygame.Rect(0, 0, w, h).move(
-        center[0] - w // 2 + offset_x, center[1] - h // 2 + offset_y,
-    )
-    pygame.draw.ellipse(surface, COLOR_EYE, rect)
-
-
-def _line(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """감긴 눈 — 가로 선."""
+    """공막 + 홍채 + 동공 + 하이라이트 + 눈꺼풀."""
     cx, cy = center
-    half = size // 2
-    pygame.draw.line(
-        surface, COLOR_EYE,
-        (cx - half + 4, cy), (cx + half - 4, cy),
-        LINE_THICK,
-    )
+    ry = int(size * 0.5 * p.eye_scale)
+    rx = int(size * 0.40 * p.eye_scale)
+    if rx < 2 or ry < 2:
+        return
 
+    lid_top = max(p.lid_top, blink)
+    if force_closed:
+        lid_top = 1.0
+    lid_bot = p.lid_bot
+    if lid_top + lid_bot >= 0.97:
+        _closed_line(surface, center, size, p, inner_sign)
+        return
+
+    # 공막
+    _aa_filled_ellipse(surface, cx, cy, rx, ry, COLOR_EYE)
+
+    # 홍채/동공 — 시선 오프셋. 공막 안에 머물도록 clamp.
+    iris_r = int(size * 0.31 * p.iris_scale)
+    pupil_r = int(iris_r * 0.48 * p.pupil_scale)
+    max_dx = max(0, rx - iris_r + 4)
+    max_dy = max(0, ry - iris_r + 4)
+    ox = int(max(-max_dx, min(max_dx, gx * rx * 0.55)))
+    oy = int(max(-max_dy, min(max_dy, gy * ry * 0.45)))
+    ix, iy = cx + ox, cy + oy
+    _aa_filled_circle(surface, ix, iy, iris_r, COLOR_IRIS)
+    _aa_filled_circle(surface, ix, iy, pupil_r, COLOR_PUPIL)
+    # 하이라이트 — 좌상단 큰 점 + 우하단 작은 점
+    h1 = max(2, int(iris_r * 0.38))
+    h2 = max(1, int(iris_r * 0.18))
+    _aa_filled_circle(surface, ix - int(iris_r * 0.38), iy - int(iris_r * 0.40), h1, COLOR_HIGHLIGHT)
+    _aa_filled_circle(surface, ix + int(iris_r * 0.40), iy + int(iris_r * 0.42), h2, COLOR_HIGHLIGHT)
+
+    # 눈꺼풀 — BG색 폴리곤으로 덮음 (배경이 단색이라 성립)
+    top, bottom = cy - ry, cy + ry
+    h = 2 * ry
+    pad = 6
+    if lid_top > 0.01:
+        # 안쪽 끝 y / 바깥쪽 끝 y — tilt(deg)로 차이
+        tilt_px = math.tan(math.radians(p.lid_tilt)) * rx
+        base = top + lid_top * h
+        y_inner = base + tilt_px
+        y_outer = base - tilt_px
+        if inner_sign > 0:   # 왼쪽 눈: 안쪽 = 오른쪽
+            pts = [(cx - rx - pad, top - pad), (cx + rx + pad, top - pad),
+                   (cx + rx + pad, y_inner), (cx - rx - pad, y_outer)]
+        else:
+            pts = [(cx - rx - pad, top - pad), (cx + rx + pad, top - pad),
+                   (cx + rx + pad, y_outer), (cx - rx - pad, y_inner)]
+        pygame.draw.polygon(surface, COLOR_BG, [(int(x), int(y)) for x, y in pts])
+        # 눈꺼풀 경계선 (살짝 두껍게) — 감긴 느낌 강조
+        if lid_top > 0.12:
+            pygame.draw.line(surface, COLOR_BG, (int(pts[3][0]), int(pts[3][1])),
+                             (int(pts[2][0]), int(pts[2][1])), 2)
+    if lid_bot > 0.01:
+        y = bottom - lid_bot * h
+        pygame.draw.rect(surface, COLOR_BG,
+                         pygame.Rect(cx - rx - pad, int(y), 2 * rx + 2 * pad, ry + pad * 2))
+
+
+def _closed_line(
+    surface: pygame.Surface, center: tuple[int, int], size: int,
+    p: EyeParams, inner_sign: int,
+) -> None:
+    """감긴 눈 — 살짝 아래로 휜 호 (기울기 반영)."""
+    cx, cy = center
+    half = int(size * 0.36)
+    tilt_px = int(math.tan(math.radians(p.lid_tilt)) * half * 0.6)
+    y_in = cy + tilt_px
+    y_out = cy - tilt_px
+    if inner_sign > 0:
+        a, b = (cx - half, y_out), (cx + half, y_in)
+    else:
+        a, b = (cx - half, y_in), (cx + half, y_out)
+    pygame.draw.line(surface, COLOR_EYE, a, b, LINE_THICK)
+    _aa_filled_circle(surface, a[0], a[1], LINE_THICK // 2, COLOR_EYE)
+    _aa_filled_circle(surface, b[0], b[1], LINE_THICK // 2, COLOR_EYE)
+
+
+def _brow(
+    surface: pygame.Surface, center: tuple[int, int], size: int,
+    p: EyeParams, inner_sign: int,
+) -> None:
+    cx, cy = center
+    ry = int(size * 0.5 * p.eye_scale)
+    half = int(size * 0.32)
+    y0 = cy - ry - 10 - int(p.brow_lift)
+    tilt_px = math.tan(math.radians(p.brow_tilt)) * half
+    y_in = y0 + tilt_px
+    y_out = y0 - tilt_px
+    if inner_sign > 0:
+        a, b = (cx - half, y_out), (cx + half, y_in)
+    else:
+        a, b = (cx - half, y_in), (cx + half, y_out)
+    thick = max(2, int(LINE_THICK * 1.2 * p.brow))
+    pygame.draw.line(surface, COLOR_BROW, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), thick)
+
+
+def _blush(
+    surface: pygame.Surface, center: tuple[int, int], size: int,
+    intensity: float, inner_sign: int,
+) -> None:
+    cx, cy = center
+    rx = int(size * 0.22)
+    ry = int(size * 0.10)
+    x = cx - inner_sign * int(size * 0.12)
+    y = cy + int(size * 0.55)
+    color = tuple(int(b + (c - b) * intensity)
+                  for c, b in zip(COLOR_BLUSH, COLOR_BG))
+    _aa_filled_ellipse(surface, x, y, rx, ry, color)
+
+
+# ─── 특수 모양 헬퍼 ───
 
 def _arc_up(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
     """위로 휘어진 호 — ⌒ (행복)."""
     cx, cy = center
-    w = int(size * 0.85)
-    h = int(size * 0.6)
-    rect = pygame.Rect(cx - w // 2, cy - h // 2, w, h)
-    clean_arc(surface, rect, COLOR_EYE, upper=False)
+    w = int(size * 0.92)
+    h = int(size * 0.75)
+    rect = pygame.Rect(cx - w // 2, cy - h // 2 + 6, w, h)
+    clean_arc(surface, rect, COLOR_EYE, upper=False, thickness=LINE_THICK + 2)
 
 
 def _angle(
     surface: pygame.Surface, center: tuple[int, int], size: int, point_right: bool,
 ) -> None:
-    """꺾인 선 — `>` 또는 `<`. point_right=True면 `>`, False면 `<`.
-
-    선 두께가 채워진 도형보다 시각적으로 약해 보여서, 일반 LINE_THICK의 약 2배.
-    """
+    """꺾인 선 — `>` 또는 `<` (신남/찡그린 웃음)."""
     cx, cy = center
-    half = size // 2
+    half = int(size * 0.36)
     thick = LINE_THICK * 2
     if point_right:
         pts = [(cx - half + 4, cy - half // 2),
@@ -300,51 +429,50 @@ def _angle(
 
 
 def _heart(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """채워진 하트 — 좁은 lobe 간격 + 삼각형 본체 (AA)."""
-    s = size // 2
+    """채워진 하트 (핑크) + 하이라이트."""
+    s = int(size * 0.42)
     cx, cy = center
-    lobe_r = s // 2                # 원 반지름
-    lobe_dx = int(s * 0.35)        # 원 중심이 cx로부터 떨어진 거리 (이전 s/2=0.5에서 감소)
-    base_half = lobe_dx + lobe_r   # 삼각형 밑변이 lobe 가장자리에 맞춰짐
-    # 본체: 삼각형 (AA)
+    lobe_r = s // 2
+    lobe_dx = int(s * 0.35)
+    base_half = lobe_dx + lobe_r
+    color = COLOR_BLUSH
     triangle_pts = [
         (cx - base_half, cy - s // 4),
         (cx + base_half, cy - s // 4),
         (cx, cy + s),
     ]
-    _aa_filled_polygon(surface, triangle_pts, COLOR_EYE)
-    # 두 lobe — 살짝 겹치게 (V 작게)
-    _aa_filled_circle(surface, cx - lobe_dx, cy - s // 4, lobe_r, COLOR_EYE)
-    _aa_filled_circle(surface, cx + lobe_dx, cy - s // 4, lobe_r, COLOR_EYE)
+    _aa_filled_polygon(surface, triangle_pts, color)
+    _aa_filled_circle(surface, cx - lobe_dx, cy - s // 4, lobe_r, color)
+    _aa_filled_circle(surface, cx + lobe_dx, cy - s // 4, lobe_r, color)
+    _aa_filled_circle(surface, cx - lobe_dx - lobe_r // 3, cy - s // 4 - lobe_r // 3,
+                      max(2, lobe_r // 3), COLOR_HIGHLIGHT)
 
 
 def _star(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
     """5각 별 (AA)."""
     cx, cy = center
-    outer_r = size // 2
-    inner_r = outer_r * 0.4
+    outer_r = int(size * 0.42)
+    inner_r = outer_r * 0.42
     points: list[tuple[int, int]] = []
     for i in range(10):
         angle = -math.pi / 2 + i * math.pi / 5
         r = outer_r if i % 2 == 0 else inner_r
         points.append((int(cx + r * math.cos(angle)), int(cy + r * math.sin(angle))))
-    _aa_filled_polygon(surface, points, COLOR_EYE)
+    _aa_filled_polygon(surface, points, (255, 220, 90))
+    _aa_filled_circle(surface, cx - outer_r // 4, cy - outer_r // 4,
+                      max(2, outer_r // 6), COLOR_HIGHLIGHT)
 
 
 def _dizzy(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
-    """소용돌이 — 동심원 + X (AA 적용)."""
+    """소용돌이 — 나선."""
     cx, cy = center
-    r_outer = size // 2
-    _aa_filled_circle(surface, cx, cy, r_outer, COLOR_EYE)
-    _aa_filled_circle(surface, cx, cy, r_outer - LINE_THICK, COLOR_BG)
-    half = r_outer // 2
-    pygame.draw.line(
-        surface, COLOR_EYE,
-        (cx - half, cy - half), (cx + half, cy + half),
-        LINE_THICK,
-    )
-    pygame.draw.line(
-        surface, COLOR_EYE,
-        (cx + half, cy - half), (cx - half, cy + half),
-        LINE_THICK,
-    )
+    r_max = int(size * 0.40)
+    pts = []
+    turns = 2.5
+    steps = 60
+    for i in range(steps + 1):
+        t = i / steps
+        ang = t * turns * 2 * math.pi
+        r = r_max * t
+        pts.append((int(cx + r * math.cos(ang)), int(cy + r * math.sin(ang))))
+    pygame.draw.lines(surface, COLOR_EYE, False, pts, LINE_THICK)
