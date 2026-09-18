@@ -36,16 +36,18 @@ FPS = 30
 # 그리기 선 두께 — 모든 얼굴 요소에 일관 적용
 LINE_THICK = 4
 
-# === 색상 (RGB) — 치비 애니 스타일 (검정 배경 + 흰 공막 + 하늘색 홍채) ===
+# === 색상 (RGB) — 치비 애니 스타일 (GPT Image 레퍼런스 시트 기준) ===
 COLOR_BG = (0, 0, 0)             # 검정
-COLOR_EYE = (255, 255, 255)      # 공막/선 흰색
-COLOR_IRIS = (110, 195, 255)     # 하늘색 홍채
-COLOR_PUPIL = (18, 24, 40)       # 거의 검정 동공
+COLOR_EYE = (250, 246, 236)      # 공막/선 크림색
+COLOR_IRIS = (125, 195, 245)     # 연하늘 홍채
+COLOR_PUPIL = (16, 22, 40)       # 짙은 남색 동공
 COLOR_HIGHLIGHT = (255, 255, 255)
-COLOR_BROW = (255, 255, 255)     # 눈썹
-COLOR_MOUTH = (255, 255, 255)    # 입 선
-COLOR_MOUTH_INNER = (170, 50, 80)  # 벌린 입 안쪽
-COLOR_BLUSH = (255, 120, 150)    # 핑크 볼터치
+COLOR_BROW = (250, 246, 236)     # 눈썹
+COLOR_MOUTH = (250, 246, 236)    # 입 선
+COLOR_MOUTH_INNER = (238, 120, 150)  # 벌린 입 속 (핑크)
+COLOR_BLUSH = (238, 130, 160)    # 핑크 볼터치
+COLOR_BLUSH_LINE = (200, 80, 120)  # 볼터치 사선
+COLOR_HEART = (236, 90, 130)     # 하트 눈
 COLOR_INDICATOR_REC = (255, 100, 100)  # 녹음 인디케이터만 빨강
 
 # === LCD 핀 (Pi 5 BCM) — robot 모드에서만 의미있음 ===

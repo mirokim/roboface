@@ -132,10 +132,10 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     sh_dx, sh_dy = extras.shiver_offset(face.shiver_intensity, now)
 
     # === 얼굴 레이아웃 — 큰 치비 눈 기준 고정 ===
-    eye_size = 96                              # 눈 높이(px)
-    eye_offset = int(DISPLAY_WIDTH * 0.20)     # 중심에서 좌우 거리
-    eye_y = 98
-    mouth_y = 186
+    eye_size = 80                              # 눈 지름(px)
+    eye_offset = int(DISPLAY_WIDTH * 0.19)     # 중심에서 좌우 거리
+    eye_y = 112
+    mouth_y = 182
 
     # 말풍선 떠 있어도 얼굴 위치는 고정 — 위쪽에 덮어 그림
     speech_active = face.speech_text and now < face.speech_until
