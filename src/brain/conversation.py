@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from src.config import (
+    AGENT_DISABLED,
     ANTHROPIC_API_KEY,
     CLAUDE_MODEL,
     CLAUDE_MODEL_HEAVY,
@@ -465,8 +466,8 @@ def generate_situational(
     recent_dialog: 최근 대화 (memory.recent_conversation 결과 형식).
     """
     from src.brain.time_of_day import period_ko
-    from src.config import ANTHROPIC_API_KEY
-    if not ANTHROPIC_API_KEY:
+    # AGENT_DISABLED(원격 제어 모드)면 자율 Claude 호출 전부 차단 → 호출부는 풀 fallback
+    if not ANTHROPIC_API_KEY or AGENT_DISABLED:
         return ""
 
     now = datetime.now()
@@ -498,7 +499,9 @@ def generate_situational(
 
 
 def generate_proactive_message(trigger_kind: str, context: dict[str, Any]) -> str:
-    """능동 멘트 생성."""
+    """능동 멘트 생성. AGENT_DISABLED면 "" (proactive_speaker가 풀 fallback)."""
+    if AGENT_DISABLED:
+        return ""
     now = datetime.now()
     prompt = f"""현재 상황:
 - 시각: {now.strftime("%Y-%m-%d %H:%M (%A)")}

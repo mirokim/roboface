@@ -61,9 +61,9 @@ async def fire_trigger(
 
     # 멘트 결정 — API 키 있으면 Claude 우선 (풀은 fallback).
     # 컨텍스트(work_minutes/시간대/이름 등)를 살려 풍부한 멘트 가능.
-    from src.config import ANTHROPIC_API_KEY
+    from src.config import AGENT_DISABLED, ANTHROPIC_API_KEY
     message = ""
-    if ANTHROPIC_API_KEY:
+    if ANTHROPIC_API_KEY and not AGENT_DISABLED:
         try:
             loop = asyncio.get_running_loop()
             message = await loop.run_in_executor(

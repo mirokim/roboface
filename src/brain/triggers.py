@@ -378,8 +378,8 @@ def check_chitchat(
     SSOT: ANTHROPIC_API_KEY 설정돼있으면 RobotAgent가 챗챗 담당 → 여기선 항상 None.
     API 키 없을 때만 풀에서 멘트 골라 fallback.
     """
-    from src.config import ANTHROPIC_API_KEY
-    if ANTHROPIC_API_KEY:
+    from src.config import AGENT_DISABLED, ANTHROPIC_API_KEY
+    if ANTHROPIC_API_KEY and not AGENT_DISABLED:
         return None   # agent에 위임
 
     if not _proactive_allowed(ctx):
