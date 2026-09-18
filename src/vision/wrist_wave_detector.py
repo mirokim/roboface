@@ -58,7 +58,9 @@ class WristWaveDetector:
         # 어깨너비의 62% 이상 — 실측 진짜 wave 0.56~0.63 하단 잘릴 위험 있어
         # 0.55→0.62 (D gate가 false +의 대부분 잡으니 보수적 상승).
         # 진짜 인사도 못 잡으면 0.55로 되돌릴 것.
-        min_amplitude_ratio: float = 0.62,
+        # 2026-09-18: 0.62 → 0.45 — 사용자 실제 wave가 안 잡힘. 카메라 구도 수정으로
+        # 손목 conf가 올라와 false + 여지는 줄었음.
+        min_amplitude_ratio: float = 0.45,
         # 2 사이클 — 좌→우→좌→우→좌.
         min_zero_crossings: int = 4,
         max_zero_crossings: int = 16,
@@ -196,7 +198,8 @@ class WristWaveDetector:
         # 0.1 → -0.1: 어깨선보다 어깨너비의 10% 더 위로 올라와야 인정.
         # 컵 들기/타이핑 시 손이 어깨 살짝 위로 오는 자연 동작 차단.
         # 진짜 인사는 손을 머리 옆 또는 어깨 한참 위로 듦.
-        max_below = -shoulder_width * 0.1
+        # 2026-09-18: -0.1 → +0.15 — 어깨선 살짝 아래(가슴 위)에서 흔드는 것도 인정.
+        max_below = shoulder_width * 0.15
         self.frames_seen += 1
 
         # 손목 push: confidence 통과 AND 손목이 허리보다 아래는 아닐 때.
@@ -252,7 +255,8 @@ class WristWaveDetector:
         now = time.time()
         if now - self._last_debug_log_at > 2.0:
             self._last_debug_log_at = now
-            log.debug(
+            # 후보(진폭 어깨너비 25%+)는 INFO — 실기 튜닝용
+            (log.info if amp_ratio >= 0.25 else log.debug)(
                 f"wave eval [{side}] amp_ratio={amp_ratio:.2f} zc={zero_crossings} "
                 f"(amp_ratio≥{self.min_amplitude_ratio}, "
                 f"zc {self.min_zero_crossings}~{self.max_zero_crossings})"
