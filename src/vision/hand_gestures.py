@@ -90,6 +90,7 @@ class HandGestureDetector:
             maxlen=max(6, int(fps * wave_history_sec)),
         )
         self._hand_width_history: deque[float] = deque(maxlen=self._palm_history.maxlen)
+        self._open_history: deque[bool] = deque(maxlen=self._palm_history.maxlen)
         self.wave_min_amp_ratio = wave_min_amp_ratio
         self.wave_cooldown_sec = wave_cooldown_sec
         self._last_wave_at = 0.0
@@ -130,6 +131,7 @@ class HandGestureDetector:
     def reset(self) -> None:
         self._palm_history.clear()
         self._hand_width_history.clear()
+        self._open_history.clear()
         self._last_seen = ("", 0)
 
     def process(self, frame_rgb: Any, ts_ms: int) -> tuple[str | None, bool]:
@@ -168,6 +170,13 @@ class HandGestureDetector:
             if hand_width > 0.01:
                 self._palm_history.append(palm_x)
                 self._hand_width_history.append(hand_width)
+                # 흔드는 동안 손바닥이 펴져 있는지 (Open_Palm) — 마우스/타이핑 손과 구분
+                is_open = bool(
+                    gesture_categories
+                    and gesture_categories[0].category_name == "Open_Palm"
+                    and float(gesture_categories[0].score) >= 0.4
+                )
+                self._open_history.append(is_open)
         except Exception:
             pass
 
@@ -222,14 +231,20 @@ class HandGestureDetector:
         signs = np.sign(arr - median_val)
         zc = int(np.sum(np.abs(np.diff(signs)) > 0))
 
-        if amp_ratio >= self.wave_min_amp_ratio and 2 <= zc <= 12:
+        open_ratio = (sum(self._open_history) / len(self._open_history)
+                      if self._open_history else 0.0)
+        # zc 2→4: 최소 2사이클. open_ratio: 창의 절반 이상 손바닥 펴짐.
+        if amp_ratio >= self.wave_min_amp_ratio and 4 <= zc <= 12 and open_ratio >= 0.5:
             log.info(
-                f"👋 hand wave 감지! amp_ratio={amp_ratio:.2f} zc={zc}"
+                f"👋 hand wave 감지! amp_ratio={amp_ratio:.2f} zc={zc} open={open_ratio:.2f}"
             )
             self._last_wave_at = time.time()
             self._palm_history.clear()
             self._hand_width_history.clear()
+            self._open_history.clear()
             return True
+        if amp_ratio >= self.wave_min_amp_ratio and zc >= 2:
+            log.debug(f"hand wave 후보 미달: amp={amp_ratio:.2f} zc={zc} open={open_ratio:.2f}")
         return False
 
     def close(self) -> None:

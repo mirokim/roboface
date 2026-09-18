@@ -264,7 +264,7 @@ class BehaviorConfig:
 
     # IMX500 캡처 루프 목표 fps — 센서 FrameRate + 루프 period. 실제 fps는
     # 캡처+후처리(HigherHRNet CPU 디코딩) 시간에 묶임. 로그 "camera capture+postprocess" 참조
-    vision_target_fps: float = 15.0
+    vision_target_fps: float = 20.0
     # 프레임당 CPU 절약: MediaPipe 손 인식은 N프레임마다, 표정 거울(haar)은 N초마다
     hand_gesture_every_n_frames: int = 2
     emotion_interval_sec: float = 0.4
