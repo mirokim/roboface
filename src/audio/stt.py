@@ -87,17 +87,27 @@ class LocalFasterWhisperSTT:
                 buf,
                 language=self.language,
                 beam_size=self.beam_size,
-                vad_filter=False,
-                # hallucination 억제:
-                # - no_speech_threshold 높임: noise→텍스트 변환 빡세게
-                # - condition_on_previous_text False: 이전 텍스트 영향 차단
-                # - compression_ratio_threshold 낮춤: 반복/이상 출력 차단
-                no_speech_threshold=0.7,
+                # Silero VAD로 무음/소음 구간 제거 — webrtcvad가 흘려보낸 사무실
+                # 소음 세그먼트에서 "안녕!" 같은 hallucination 크게 감소
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.5},
+                no_speech_threshold=0.6,
                 condition_on_previous_text=False,
                 compression_ratio_threshold=2.0,
                 initial_prompt=None,
             )
-            text = " ".join(s.text for s in segments).strip()
+            kept: list[str] = []
+            for seg in segments:
+                # 세그먼트 신뢰도 게이트 — 소음에서 나온 텍스트는 logprob 낮고
+                # no_speech_prob 높음. 실제 발화는 보통 avg_logprob > -0.8.
+                if seg.no_speech_prob > 0.5 or seg.avg_logprob < -1.0:
+                    log.info(
+                        f'STT(local): low-confidence drop — "{seg.text.strip()}" '
+                        f"(logprob={seg.avg_logprob:.2f}, no_speech={seg.no_speech_prob:.2f})"
+                    )
+                    continue
+                kept.append(seg.text)
+            text = " ".join(kept).strip()
             if self._is_hallucination(text):
                 log.info(f'STT(local): hallucination drop — "{text}"')
                 return ""

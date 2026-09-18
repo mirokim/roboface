@@ -247,7 +247,7 @@ class BehaviorConfig:
 
     # ambient STT — 이 peak(16-bit) 미만 발화는 Whisper에 안 보냄 (마이크 floor 가드).
     # CM421 사무실 환경 floor가 800~1500이라 400은 소음까지 통과시킴.
-    ambient_min_peak: int = 400
+    ambient_min_peak: int = 1500
 
     # 표정 스냅샷(face_snapshots) 보관 — 통계용 사진은 하루만 두고 계속 정리.
     # 얼굴 라이브러리(faces/ 썸네일)는 별도라 영향 없음.
