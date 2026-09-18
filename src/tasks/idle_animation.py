@@ -61,8 +61,8 @@ async def run_idle_gaze(
 _AMBIENT_MIN_INTERVAL_SEC = 20.0
 _AMBIENT_MAX_INTERVAL_SEC = 60.0
 # 사용자 있을 때는 빈도 ↓ — '딴 데 봤다가 휙 돌림' 인상 완화
-_AMBIENT_USER_PRESENT_MIN_SEC = 40.0
-_AMBIENT_USER_PRESENT_MAX_SEC = 120.0
+_AMBIENT_USER_PRESENT_MIN_SEC = 25.0
+_AMBIENT_USER_PRESENT_MAX_SEC = 70.0
 
 # 가끔(12%) bpm/진폭 키워 "신난 살랑이"
 _AMBIENT_LIVELY_PROB = 0.12
@@ -104,11 +104,13 @@ async def run_ambient_motion(
         # 사용자가 있으면 head_tracker를 너무 길게 끊지 않게 짧고 작게.
         # 진폭 1.5-2.5° — 머리 거의 안 움직이는 미세 sway. 복귀 시 점프 X.
         if ctx.user_present:
+            # 2026-09-18 "가끔 몸도 가볍게 흔들자" — 1.5~2.5° 1비트에서
+            # 3~5° 1~2비트로. sway는 현재 위치 기준이라 head_tracker 복귀 점프 없음.
             params = dict(
-                bpm=random.randint(40, 55),
-                beats=1,
-                pan_amp_deg=random.uniform(1.5, 2.5),
-                tilt_amp_deg=random.uniform(0.5, 1.0),
+                bpm=random.randint(45, 60),
+                beats=random.choice([1, 2]),
+                pan_amp_deg=random.uniform(3.0, 5.0),
+                tilt_amp_deg=random.uniform(1.0, 2.0),
             )
         elif random.random() < _AMBIENT_LIVELY_PROB:
             params = dict(bpm=80, beats=6, pan_amp_deg=10.0, tilt_amp_deg=3.0)
