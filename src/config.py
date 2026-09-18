@@ -248,6 +248,15 @@ class BehaviorConfig:
     # 얼굴 인식이 연속으로 이만큼 실패해야 user_name/last_recognized 클리어
     # (옆얼굴 한 번에 이름 깜빡임 방지)
     face_forget_sec: float = 15.0
+    # 이름 있는 사람이 자리를 안 떴는데(presence_left 없음) 새 auto 클러스터가 뜨면
+    # 같은 사람으로 병합하는 최대 창 (분)
+    face_continuity_max_min: float = 30.0
+
+    # 제스처 응답 쿨다운 — 끄덕/도리 반응이 너무 잦아 15→60s
+    gesture_reply_cooldown_sec: float = 60.0
+    # 시선(gaze_at_me) 반응: 표정은 항상, 말은 이 확률로 + 긴 쿨다운
+    gaze_reply_speech_prob: float = 0.25
+    gaze_reply_cooldown_sec: float = 300.0
     # 부팅/재시작 후 이 시간 안엔 인사류(reappear/face_recognize/new_face) 생략
     boot_greeting_grace_sec: float = 45.0
     # 이름 있는 사람 인식 후 이 시간 안에 뜬 auto 클러스터(한 명일 때)는 그 사람으로 병합

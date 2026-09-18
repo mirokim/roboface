@@ -170,7 +170,7 @@ class _HeadOscillationDetector:
         axis: int,
         fps: float = 5.0,
         history_sec: float = 2.2,    # 1.8→2.2: 더 긴 sustained 동작 필요
-        cooldown_sec: float = 30.0,  # 20→30: 한 번 감지 후 30초 차단
+        cooldown_sec: float = 90.0,  # 30→90: 5fps에선 오탐 잦아 간격 더 넓힘
         min_amp: float = 0.10,       # 8→10%: 자연 머리 미세 진동 차단
         max_amp: float = 0.14,       # 12→14: 진짜 큰 끄덕임도 잡되 회전은 거름
         min_zc: int = 8,             # 6→8: 4 사이클 이상 — 의도적 반복 동작

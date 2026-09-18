@@ -145,6 +145,7 @@ async def run_vision(
     last_face_match_at = 0.0
     last_named_person: str | None = None
     last_named_at = 0.0
+    last_person_left_at = 0.0
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
@@ -425,6 +426,7 @@ async def run_vision(
                             and time.time() - perception.last_person_seen_at
                             > detector.away_timeout_sec):
                         perception.clear_person()
+                        last_person_left_at = time.time()
 
             # person_bbox 잠깐 끊겨도 1.5초까지는 이전 bbox 유지 — wave detector가
             # 손 흔들기 중 person 인식 깜빡임으로 reset되는 거 방지.
@@ -643,10 +645,14 @@ async def run_vision(
                                     # 에 이름 있는 사람으로 인식됐다면, 지금 뜬 auto 클러스터는
                                     # 같은 사람의 다른 각도 → 그 사람으로 흡수. 옆얼굴마다
                                     # auto_NNN이 늘어나고 이름이 깜빡이는 걸 막는다.
+                                    _since_named = time.time() - last_named_at
+                                    _stayed = (perception is None or not perception.person_present
+                                               or last_person_left_at < last_named_at)
                                     if (cluster_name.startswith("auto_")
                                             and last_named_person is not None
-                                            and time.time() - last_named_at
-                                            < BEHAVIOR.face_continuity_sec
+                                            and (_since_named < BEHAVIOR.face_continuity_sec
+                                                 or (_stayed and _since_named
+                                                     < BEHAVIOR.face_continuity_max_min * 60))
                                             and (perception is None
                                                  or perception.person_count <= 1)):
                                         try:

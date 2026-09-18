@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
+import random
 import time
 from datetime import datetime
 
@@ -20,9 +21,9 @@ from src.brain.agent import RobotAgent
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.config import (
-    AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, WAKE_DISABLED, is_robot,
+    AMBIENT_LISTEN, AUDIO_INPUT_DEVICE, BEHAVIOR, WAKE_DISABLED, is_robot,
 )
-from src.face.expressions import HAPPY, NEUTRAL, SURPRISED
+from src.face.expressions import CURIOUS, HAPPY, NEUTRAL, SURPRISED
 from src.face.renderer import FaceState
 from src.integrations.thinktank.offline_queue import run_flusher as run_queue_flusher
 from src.motion import poses
@@ -338,10 +339,16 @@ def _handle_sensor_event(
         memory.log_user("(도리도리 — no)", kind="gesture_shake")
         asyncio.create_task(_simple_reply(ctx, face, "shake"))
     elif ev.type == SensorEventType.GAZE_AT_ME:
-        log.info("👀 정면 응시 응답 시작")
+        # 시선은 자주 발생(시간당 수십 회) → 기본은 표정으로만 "봤어" 신호,
+        # 말은 확률·긴 쿨다운으로 가끔만 (사용자 피드백: 반응이 너무 잦음)
         memory.log_user("(사용자가 나를 쳐다봄)", kind="gaze_at_me")
         robot_stats.on_event("gaze")
-        asyncio.create_task(_simple_reply(ctx, face, "gaze"))
+        flash_expression(face, CURIOUS, 1.2)
+        if random.random() < BEHAVIOR.gaze_reply_speech_prob:
+            log.info("👀 정면 응시 응답 시작")
+            asyncio.create_task(_simple_reply(
+                ctx, face, "gaze", cooldown_sec=BEHAVIOR.gaze_reply_cooldown_sec,
+            ))
     # MediaPipe Hands 기반 손 제스처 — 카테고리별 단순 reply + stat
     elif ev.type == SensorEventType.HAND_THUMB_UP:
         memory.log_user("(엄지척 👍)", kind="hand_thumb_up")
@@ -379,6 +386,8 @@ async def _simple_reply(
     """
     if ctx.state in (State.TALKING, State.LISTENING, State.GREETING):
         return
+    if cooldown_sec is None:
+        cooldown_sec = BEHAVIOR.gesture_reply_cooldown_sec
     loop = asyncio.get_running_loop()
     msg = await loop.run_in_executor(
         None, lambda: conversation_templates.pick(gesture_kind, ctx),
@@ -388,7 +397,7 @@ async def _simple_reply(
     behavior_speaker.say(
         face, ctx, msg,
         kind=f"gesture_{gesture_kind}",
-        cooldown_sec=15.0,
+        cooldown_sec=cooldown_sec,
     )
 
 
