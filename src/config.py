@@ -245,6 +245,10 @@ class BehaviorConfig:
     # 1800s(30min): 무료 tier 1M calls/month 한참 안 깸 + 날씨 변화엔 충분히 빠름.
     weather_cache_sec: float = 1800.0
 
+    # ambient STT — 이 peak(16-bit) 미만 발화는 Whisper에 안 보냄 (마이크 floor 가드).
+    # CM421 사무실 환경 floor가 800~1500이라 400은 소음까지 통과시킴.
+    ambient_min_peak: int = 400
+
     # 표정 스냅샷(face_snapshots) 보관 — 통계용 사진은 하루만 두고 계속 정리.
     # 얼굴 라이브러리(faces/ 썸네일)는 별도라 영향 없음.
     snapshot_keep_days: float = 1.0

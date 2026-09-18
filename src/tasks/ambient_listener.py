@@ -13,12 +13,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 from collections.abc import AsyncIterator, Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 from src.brain import memory
+from src.config import BEHAVIOR
 from src.utils.logger import get_logger
+
+# AMBIENT_DEBUG_WAV=1 → STT로 보내는 마지막 발화 WAV를 /tmp/roboface_last_utt.wav에 저장
+AMBIENT_DEBUG_WAV = os.getenv("AMBIENT_DEBUG_WAV", "0") == "1"
 
 log = get_logger("ambient")
 
@@ -254,9 +260,15 @@ class WhisperVADStreamer:
             # base level hallucination("고맙습니다" 등) 차단 + CPU/비용 절약.
             # peak < 400은 일반 마이크 floor 수준 — 실제 발화는 보통 1000+.
             wav_peak = _wav_peak(wav)
-            if wav_peak < 400:
+            if wav_peak < BEHAVIOR.ambient_min_peak:
                 log.debug(f"utterance too quiet — skip (peak={wav_peak})")
                 continue
+            log.info(f"utterance → STT (peak={wav_peak}, {len(wav) // 32000}.{(len(wav) % 32000) // 3200}s)")
+            if AMBIENT_DEBUG_WAV:
+                try:
+                    Path("/tmp/roboface_last_utt.wav").write_bytes(wav)
+                except Exception:
+                    pass
             # 마이크 게인이 낮으면 (저감도 USB 마이크) Whisper가 텍스트 못 뽑음.
             # WAV peak를 ~30000(clip 직전)으로 정규화.
             wav = _normalize_wav_peak(wav)
