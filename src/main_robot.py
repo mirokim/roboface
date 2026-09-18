@@ -379,6 +379,7 @@ def _handle_sensor_event(
 
 async def _simple_reply(
     ctx: StateContext, face: FaceState, gesture_kind: str,
+    cooldown_sec: float | None = None,
 ) -> None:
     """짧은 발화만 — 표정/머리는 그대로. 끄덕임/도리도리 응답용.
 
