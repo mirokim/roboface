@@ -189,6 +189,10 @@ class BehaviorConfig:
     proactive_quiet_hours: tuple[int, int] = (22, 7)  # 밤 10시~아침 7시는 자제
 
     # 잡담 (chit-chat) — long_silence보다 가볍게, 사용자 있을 때 짧게 말 걸기
+    # 거리 변화 멘트("멀어지네"/"가까이 왔네") — bbox 추정이라 흔들리고 사용자가
+    # "쓸데없는 말"이라 해서 기본 off (2026-09-18)
+    distance_comments_enabled: bool = False
+
     chitchat_min_interval_sec: int = 90     # 마지막 발화 후 1.5분 지나면 후보
     chitchat_max_interval_sec: int = 240    # 4분 안엔 무조건 한 번
 

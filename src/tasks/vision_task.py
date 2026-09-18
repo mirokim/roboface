@@ -389,7 +389,9 @@ async def run_vision(
                         # 자주 흔들려서 Claude 컨텍스트 오염시켜 "왔다 갔다"
                         # 인상 줌. 실제 발화한 경우만 say() 내부에서 log_robot됨.
                         # 임계 ±100cm — 진짜 큰 거리 변화만 멘트 (bbox 추정 정확도 한계).
-                        if delta < -100:
+                        if not BEHAVIOR.distance_comments_enabled:
+                            last_distance_for_comment = smoothed
+                        elif delta < -100:
                             behavior_speaker.say(
                                 face, ctx,
                                 behavior_speaker.closer_message(ctx),
