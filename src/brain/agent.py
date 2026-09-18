@@ -27,6 +27,7 @@ from src.brain.state_machine import State, StateContext, motion_busy_scope
 from src.brain.time_of_day import period_ko
 from src.brain.triggers import _is_quiet_hours
 from src.config import (
+    AGENT_DISABLED,
     AMBIENT_LISTEN,
     ANTHROPIC_API_KEY,
     BEHAVIOR,
@@ -37,7 +38,10 @@ from src.config import (
 
 # 로컬/hybrid 백엔드면 API 키 없어도 agent 동작 (hybrid는 키 없으면 항상
 # 로컬로 빠짐). 게이트 모두 이 플래그로 통일.
-LLM_AVAILABLE = LLM_BACKEND in ("local", "hybrid") or bool(ANTHROPIC_API_KEY)
+LLM_AVAILABLE = (
+    not AGENT_DISABLED
+    and (LLM_BACKEND in ("local", "hybrid") or bool(ANTHROPIC_API_KEY))
+)
 
 # mic STT 실제 활성 여부 — agent prompt의 마이크 안내 분기 기준
 AMBIENT_LISTEN_ACTIVE = AMBIENT_LISTEN and bool(OPENAI_API_KEY)
@@ -898,7 +902,8 @@ class RobotAgent:
             interval_sec = BEHAVIOR.agent_interval_sec
         if not LLM_AVAILABLE:
             log.info(
-                f"agent 비활성 — LLM backend={LLM_BACKEND}, "
+                f"agent 비활성 — AGENT_DISABLED={AGENT_DISABLED}, "
+                f"LLM backend={LLM_BACKEND}, "
                 f"ANTHROPIC_API_KEY={'O' if ANTHROPIC_API_KEY else 'X'}"
             )
             return

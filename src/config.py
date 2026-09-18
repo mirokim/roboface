@@ -112,6 +112,9 @@ WEB_UI_PASSWORD = os.getenv("WEB_UI_PASSWORD", "")    # 빈 문자열 → UI 비
 # "local"  → llama-cpp-python + GGUF 모델 (오프라인, 비용 0)
 # 봇 setup이 모델 다운로드 + .env에 LLM_BACKEND=local 설정.
 LLM_BACKEND = os.getenv("LLM_BACKEND", "claude").lower()
+# AGENT_DISABLED=1 → 자율 agent 루프 완전 정지 (외부에서 robot_cli/웹 UI로만
+# 제어할 때). LLM 백엔드/키 설정과 무관하게 최우선.
+AGENT_DISABLED = os.getenv("AGENT_DISABLED", "0") == "1"
 
 # === Anthropic ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
