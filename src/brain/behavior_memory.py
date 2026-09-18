@@ -208,6 +208,12 @@ def remarks(now: float | None = None) -> list[str]:
     if yday and yday.get("speech", 0) >= 5 and today.get("speech", 0) == 0:
         out.append("어제는 말 많이 걸어줬는데 오늘은 조용하네.")
 
+    # 기억 멘트는 12시간 안에 이미 한 건 제외 (같은 사실 반복 X)
+    try:
+        said = memory.recent_robot_messages(minutes=720)
+        out = [m for m in out if not any(m in s for s in said)]
+    except Exception:
+        pass
     return out
 
 

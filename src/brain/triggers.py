@@ -358,10 +358,18 @@ def _pick_chitchat_message(
         recent = set(memory.recent_robot_messages(minutes=30.0))
     except Exception:
         recent = set()
-    chosen_pool = random.choice(pools)
-    # 같은 풀 안에서 fresh 우선
-    fresh = [m for m in chosen_pool if not _msg_in_recent(m, recent)]
-    msg = random.choice(fresh if fresh else chosen_pool)
+    # 풀을 무작위 순서로 돌며 fresh 멘트가 있는 첫 풀 사용 — 후보 1개짜리 풀
+    # (행동 기억 등)이 최근에 한 말이면 같은 말 반복하지 않고 다른 풀로.
+    order = list(pools)
+    random.shuffle(order)
+    msg = None
+    for chosen_pool in order:
+        fresh = [m for m in chosen_pool if not _msg_in_recent(m, recent)]
+        if fresh:
+            msg = random.choice(fresh)
+            break
+    if msg is None:
+        msg = random.choice(random.choice(pools))
     # 이름 알면 40% 확률로 prefix
     if user_name and random.random() < 0.4:
         prefix = random.choice([f"{user_name}아, ", f"{user_name}, ", f"{user_name}! "])
