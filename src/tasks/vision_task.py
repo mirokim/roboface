@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 from src.brain.perception import PerceptionState
 from src.brain.state_machine import StateContext
-from src.config import DATA_DIR, VISION_MODE
+from src.config import BEHAVIOR, DATA_DIR, VISION_MODE
 from src.face.renderer import FaceState
 from src.sensors.base import SensorEvent, SensorEventType
 from src.tasks import behavior_speaker
@@ -18,6 +18,7 @@ from src.utils.logger import get_logger
 from src.vision.emotion_mirror import (
     EMOTION_SAD, EMOTION_SMILE, EMOTION_SURPRISED, EmotionMirror,
 )
+from src.vision import face_memory as face_memory_mod
 from src.vision.face_memory import FaceMemory, detect_face_crop
 from src.vision.person_detector import PersonDetector
 from src.vision import debug_snapshot, photo_memory
@@ -126,9 +127,21 @@ async def run_vision(
     else:
         wave_detector = WaveDetector(fps=fps)
     emotion_mirror = EmotionMirror() if face is not None else None
-    face_memory = FaceMemory(DATA_DIR / "faces.db") if ctx is not None else None
+    face_memory: FaceMemory | None = None
+    if ctx is not None:
+        # sface 모델 준비 (없으면 1회 다운로드) → 백엔드별 DB 경로
+        try:
+            face_memory_mod.ensure_models()
+        except Exception as e:
+            log.warning(f"face model 준비 실패: {e}")
+        face_memory = FaceMemory(face_memory_mod.default_db_path())
+        try:
+            face_memory.prune()
+        except Exception:
+            pass
     last_recognized: str | None = None
     last_recognize_at = 0.0
+    last_face_reload_at = time.time()
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
@@ -569,17 +582,29 @@ async def run_vision(
                             user_name=(ctx.user_name if ctx else None),
                         )
                         next_snapshot_at = now_ts + _r.uniform(1800, 3600)  # 30-60분
-                    # 하루에 한 번 오래된 사진 정리
-                    if now_ts - last_snapshot_cleanup > 86400:
+                    # 주기적으로 오래된 사진 정리 (BEHAVIOR.snapshot_purge_interval_sec)
+                    if now_ts - last_snapshot_cleanup > BEHAVIOR.snapshot_purge_interval_sec:
                         last_snapshot_cleanup = now_ts
                         try:
                             photo_memory.purge_old()
                         except Exception as e:
                             log.debug(f"snapshot purge 실패: {e}")
+                        if face_memory is not None:
+                            try:
+                                face_memory.prune()
+                            except Exception:
+                                pass
                     # 얼굴 인식 — 매 2초 한 번 (CPU 절약)
                     if (face_memory is not None and ctx is not None
                             and time.time() - last_recognize_at > 2.0):
                         last_recognize_at = time.time()
+                        # 웹 UI/CLI에서 이름 변경·삭제한 걸 30초 안에 반영
+                        if last_recognize_at - last_face_reload_at > 30.0:
+                            last_face_reload_at = last_recognize_at
+                            try:
+                                face_memory._load_cache()
+                            except Exception:
+                                pass
                         face_crop = detect_face_crop(frame, effective_bbox)
                         if face_crop is not None:
                             # 1) pending register 처리 우선
@@ -621,6 +646,25 @@ async def run_vision(
                                             f"😊 face: {cluster_name} "
                                             f"(seen={seen_count}, owner={owner})"
                                         )
+                                        if display_name is None and face is not None:
+                                            # 이름 없는 사람 — 처음이면 "처음 보네",
+                                            # 몇 번 본 손님이면 "또 왔네"
+                                            if seen_count <= 1:
+                                                from src.face.expressions import SURPRISED
+                                                flash_expression(face, SURPRISED, 1.0)
+                                                behavior_speaker.say(
+                                                    face, ctx,
+                                                    behavior_speaker.new_face_message(),
+                                                    kind="new_face",
+                                                    cooldown_sec=60.0,
+                                                )
+                                            elif seen_count >= 3:
+                                                behavior_speaker.say(
+                                                    face, ctx,
+                                                    behavior_speaker.guest_greeting_message(),
+                                                    kind="face_recognize",
+                                                    cooldown_sec=180.0,
+                                                )
                                         if display_name and display_name != ctx.user_name:
                                             ctx.user_name = display_name
                                             try:

@@ -321,6 +321,58 @@ async def api_register_face(request):
     })
 
 
+# === 얼굴 라이브러리 ===
+
+def _face_mem():
+    from src.vision import face_memory as fm
+    return fm.FaceMemory(fm.default_db_path())
+
+
+async def api_faces(request):
+    """클러스터 목록 — 이름/횟수/최근/썸네일 URL."""
+    try:
+        mem = _face_mem()
+        people = mem.list_people()
+        mem.close()
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+    for p in people:
+        p["thumb_url"] = f"/api/faces/thumb/{p['name']}" if p.pop("thumb") else None
+    return web.json_response(people)
+
+
+async def api_face_thumb(request):
+    from src.vision.face_memory import THUMBS_DIR
+    name = request.match_info["name"]
+    path = (THUMBS_DIR / f"{name}.jpg").resolve()
+    if not str(path).startswith(str(THUMBS_DIR.resolve())) or not path.exists():
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+
+async def api_face_rename(request):
+    data = await request.json()
+    old = (data.get("old") or "").strip()
+    new = (data.get("new") or "").strip()
+    if not old or not new:
+        return web.json_response({"error": "old/new required"}, status=400)
+    mem = _face_mem()
+    ok = mem.rename(old, new)
+    mem.close()
+    if not ok:
+        return web.json_response({"error": "rename 실패 (이름 규칙/중복)"}, status=400)
+    return web.json_response({"ok": True})
+
+
+async def api_face_delete(request):
+    data = await request.json()
+    name = (data.get("name") or "").strip()
+    mem = _face_mem()
+    ok = mem.delete(name)
+    mem.close()
+    return web.json_response({"ok": ok})
+
+
 async def api_snapshot_now(request):
     """즉시 스냅샷 — vision_task의 debug_snapshot 트리거."""
     try:
@@ -411,6 +463,10 @@ def _create_app(face, ctx, perception):
     app.router.add_post("/api/expression", api_expression)
     app.router.add_post("/api/dance", api_dance)
     app.router.add_post("/api/register-face", api_register_face)
+    app.router.add_get("/api/faces", api_faces)
+    app.router.add_get(r"/api/faces/thumb/{name}", api_face_thumb)
+    app.router.add_post("/api/faces/rename", api_face_rename)
+    app.router.add_post("/api/faces/delete", api_face_delete)
     app.router.add_post("/api/snapshot", api_snapshot_now)
     app.router.add_post("/api/update", api_update)
 

@@ -36,7 +36,16 @@ def _busy_state(ctx: StateContext) -> bool:
 # 인사류 — 5분 cooldown 공유 (greeting trigger와 공통).
 # **수동적 인사**만 포함 (사용자 등장/인식 등). 사용자가 능동적으로 손 흔들거나
 # 만세 한 건 5분 cooldown 적용하면 너무 답답 — 거기는 kind별 짧은 cooldown만.
-_GREETING_KINDS = {"reappear", "face_recognize"}
+_GREETING_KINDS = {"reappear", "face_recognize", "new_face"}
+
+# 사회적 반응 — SELF_TALK_DISABLED(원격 제어 모드)여도 통과.
+# 사람이 나타나거나 손 흔드는 것에 반응하는 건 "혼잣말"이 아니라 예의.
+_SOCIAL_KINDS = {
+    "reappear", "face_recognize", "new_face", "wave_reply", "hands_up_reply",
+    "gesture_nod", "gesture_shake", "gaze_at_me", "presence_left",
+    "hand_victory", "hand_thumb_up", "hand_thumb_down", "hand_pointing",
+    "hand_open_palm", "hand_iloveyou", "hand_fist",
+}
 
 
 def say(
@@ -60,7 +69,7 @@ def say(
     """
     if not text:
         return None
-    if SELF_TALK_DISABLED:
+    if SELF_TALK_DISABLED and kind not in _SOCIAL_KINDS:
         log.debug(f"say skip [{kind}]: SELF_TALK_DISABLED")
         return None
     if _busy_state(ctx):
@@ -245,6 +254,24 @@ def farther_message(ctx: StateContext | None = None) -> str:
 def _claude_situational_noctx(event_kind: str) -> str:
     """행동 멘트는 풀만 사용 — 항상 "" 반환 (비용 절감, _claude_situational 참조)."""
     return ""
+
+
+# 처음 보는 사람 / 이름 없는 손님
+NEW_FACE_TEMPLATES = (
+    "안녕! 처음 보는 얼굴이네.", "어, 안녕? 누구세요?", "오, 새로운 사람이다. 안녕!",
+    "안녕하세요! 저는 네모예요.", "처음 뵙네요, 안녕!",
+)
+GUEST_GREETING_TEMPLATES = (
+    "어, 또 왔네. 안녕!", "안녕, 또 봤다.", "오 다시 왔구나.", "안녕! 낯이 익어.",
+)
+
+
+def new_face_message() -> str:
+    return _pick_fresh(NEW_FACE_TEMPLATES)
+
+
+def guest_greeting_message() -> str:
+    return _pick_fresh(GUEST_GREETING_TEMPLATES)
 
 
 def face_greeting_message(name: str) -> str:

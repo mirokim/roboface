@@ -32,6 +32,7 @@ def _find_db_path() -> Path:
 
 
 DB_PATH = _find_db_path()
+FACES_DB_PATH = DB_PATH.parent / "faces_sface.db"   # face_memory sface 백엔드 DB
 
 
 def _connect() -> sqlite3.Connection:
@@ -122,6 +123,10 @@ def main() -> int:
     sg = sub.add_parser("gesture", help="vision 우회해 sensor event emit")
     sg.add_argument("kind", choices=GESTURE_KINDS)
 
+    sub.add_parser("faces", help="얼굴 라이브러리 목록 (이름/횟수/최근)")
+    sr = sub.add_parser("face-rename", help="auto_NNN 클러스터에 이름 붙이기")
+    sr.add_argument("old"); sr.add_argument("new")
+
     sub.add_parser("blink")
     sub.add_parser("status", help="현재 상태 (--wait 자동)")
     sub.add_parser("expressions", help="사용 가능한 표정 목록")
@@ -157,6 +162,34 @@ def main() -> int:
         return submit_and_report("transition", {"state": args.state}, wait)
     if args.cmd == "gesture":
         return submit_and_report("gesture", {"kind": args.kind}, wait)
+    if args.cmd == "faces":
+        if not FACES_DB_PATH.exists():
+            print(f"faces DB 없음: {FACES_DB_PATH}"); return 2
+        conn = sqlite3.connect(str(FACES_DB_PATH))
+        rows = conn.execute(
+            "SELECT name, seen_count, last_seen_at FROM faces "
+            "ORDER BY seen_count DESC, id ASC").fetchall()
+        for name, seen, last in rows:
+            ago = int(time.time() - last)
+            print(f"{name:16s} seen={seen:<4d} last={ago//60}m ago")
+        return 0
+    if args.cmd == "face-rename":
+        if not FACES_DB_PATH.exists():
+            print(f"faces DB 없음: {FACES_DB_PATH}"); return 2
+        conn = sqlite3.connect(str(FACES_DB_PATH))
+        try:
+            cur = conn.execute("UPDATE faces SET name=? WHERE name=?", (args.new, args.old))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            print("이미 있는 이름"); return 1
+        if cur.rowcount == 0:
+            print("없는 이름"); return 1
+        thumbs = FACES_DB_PATH.parent / "faces"
+        old_t = thumbs / f"{args.old}.jpg"
+        if old_t.exists():
+            old_t.replace(thumbs / f"{args.new}.jpg")
+        print(f"renamed {args.old} -> {args.new} (로봇은 30초 안에 반영)")
+        return 0
     if args.cmd == "blink":
         return submit_and_report("blink", {}, wait)
     if args.cmd == "status":

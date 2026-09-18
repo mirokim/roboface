@@ -91,6 +91,46 @@ async function loadSnapshots() {
 }
 
 // ─── 표정 목록 ───
+async function loadFaces() {
+  try {
+    const r = await fetch('/api/faces');
+    if (!r.ok) return;
+    const rows = await r.json();
+    const grid = $('face-grid');
+    grid.innerHTML = '';
+    if (rows.length === 0) {
+      grid.innerHTML = '<p style="color:var(--dim);font-size:13px">아직 아는 얼굴 없음.</p>';
+      return;
+    }
+    for (const p of rows) {
+      const cell = document.createElement('div');
+      cell.className = 'snap-cell';
+      const last = new Date(p.last_seen_at * 1000);
+      const when = `${last.getMonth()+1}/${last.getDate()} ${String(last.getHours()).padStart(2,'0')}:${String(last.getMinutes()).padStart(2,'0')}`;
+      cell.innerHTML = `
+        ${p.thumb_url ? `<img src="${p.thumb_url}" loading="lazy" alt="">` : '<div class="meta">(썸네일 없음)</div>'}
+        <div class="meta"><b>${p.name}</b> · ${p.seen_count}회 · ${when}</div>
+        <div class="meta"><button class="face-rename" data-name="${p.name}">이름</button>
+        <button class="face-del" data-name="${p.name}">삭제</button></div>
+      `;
+      grid.appendChild(cell);
+    }
+    grid.querySelectorAll('.face-rename').forEach(b => b.addEventListener('click', async () => {
+      const old = b.dataset.name;
+      const nw = prompt(`'${old}' 이름을 뭐라고 할까?`, old.startsWith('auto_') ? '' : old);
+      if (!nw) return;
+      try { await post('/api/faces/rename', {old, new: nw}); }
+      catch (e) { alert(e.message); }
+      loadFaces();
+    }));
+    grid.querySelectorAll('.face-del').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm(`'${b.dataset.name}' 삭제?`)) return;
+      await post('/api/faces/delete', {name: b.dataset.name});
+      loadFaces();
+    }));
+  } catch (e) { /* ignore */ }
+}
+
 async function loadExpressions() {
   try {
     const r = await fetch('/api/expressions');
@@ -190,6 +230,7 @@ $('cmd-update-btn').addEventListener('click', async () => {
 
 $('refresh-conv').addEventListener('click', loadConversation);
 $('refresh-snaps').addEventListener('click', loadSnapshots);
+$('refresh-faces').addEventListener('click', loadFaces);
 
 // ─── SSE 실시간 업데이트 ───
 function connectSSE() {
@@ -204,9 +245,11 @@ function connectSSE() {
 fetchState();
 loadConversation();
 loadSnapshots();
+loadFaces();
 loadExpressions();
 connectSSE();
 
 setInterval(refreshFace, 1500);   // 얼굴 1.5초마다
 setInterval(loadConversation, 15000);   // 대화 15초마다
 setInterval(loadSnapshots, 60000);       // 사진 1분마다
+setInterval(loadFaces, 60000);

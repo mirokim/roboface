@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from src.brain import memory
-from src.config import DATA_DIR
+from src.config import BEHAVIOR, DATA_DIR
 from src.utils.logger import get_logger
 
 log = get_logger("photo_memory")
 
 SNAPSHOT_DIR = DATA_DIR / "face_snapshots"
-KEEP_DAYS = 7.0
+KEEP_DAYS = BEHAVIOR.snapshot_keep_days
 
 
 def _ensure_dir(date_str: str) -> Path:

@@ -126,7 +126,7 @@ src/
 |---|---|---|
 | 모드/핀맵/API 키 | [src/config.py](src/config.py) | 환경변수 우선 |
 | 음성/STT 토글 env | [src/config.py](src/config.py) | `TTS_DISABLED`, `AMBIENT_LISTEN`, `WAKE_DISABLED`, `STT_BACKEND` (auto/local/openai), `STT_LOCAL_MODEL` (tiny/base/small) |
-| 원격 제어 모드 env | [src/config.py](src/config.py) | `AGENT_DISABLED=1` (자율 agent 루프 정지 — Claude API 호출 X), `SELF_TALK_DISABLED=1` (proactive/behavior_speaker 혼잣말 정지). 외부 세션(`ssh roboface` + robot_cli)에서 직접 제어할 때 둘 다 켬 |
+| 원격 제어 모드 env | [src/config.py](src/config.py) | `AGENT_DISABLED=1` (자율 agent 루프 정지 — Claude API 호출 X), `SELF_TALK_DISABLED=1` (proactive 루프 + 잔소리/운세/recap 정지 — 단 `behavior_speaker._SOCIAL_KINDS`(인사/새 얼굴/손인사/제스처 반응)는 통과). 외부 세션(`ssh roboface` + robot_cli)에서 직접 제어할 때 둘 다 켬 |
 | 행동 파라미터 (대화 빈도, 휴식 임계, 깜빡임, agent vision 등) | [src/config.py](src/config.py) `BehaviorConfig` | 모든 task가 `BEHAVIOR.*`로 참조 |
 | 입 모양 ↔ 음량 임계 | `BehaviorConfig.mouth_amp_thresholds` | mouth.py/tts.py 공유 — [src/face/mouth.py](src/face/mouth.py) `shape_for_amp()` |
 | 표정 정의 | [src/face/expressions.py](src/face/expressions.py) `EXPRESSIONS_BY_NAME` | agent enum 자동 도출 |
@@ -137,7 +137,7 @@ src/
 | 시스템 프롬프트(캐릭터 보이스) | [src/brain/conversation.py](src/brain/conversation.py) `SYSTEM_PROMPT` + [src/brain/agent.py](src/brain/agent.py) `_AGENT_SYSTEM` | agent용은 후자가 우선 |
 | 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing/**recall**/**remember_fact** |
 | 활동 추론 신호 | [src/brain/perception.py](src/brain/perception.py) `PerceptionState` | gaze_target/activity_level/posture_category/current_emotion/head_pan_deg/head_tilt_deg/last_frame/**last_user_called_at**(호명 시각) |
-| 얼굴 자동 학습 | [src/vision/face_memory.py](src/vision/face_memory.py) `FaceMemory.auto_track()`/`get_owner()` | 매칭 시 seen_count++, 미매칭 시 `auto_NNN` cluster 생성. throttle 10s. `MATCH_THRESHOLD=0.88`. `DEFAULT_OWNER_MIN_SEEN=20` 이상 cluster 중 최대 → "주인" 별명. vision_task가 매 2초 호출 → owner면 `ctx.user_name="주인"` |
+| 얼굴 자동 학습 / 라이브러리 | [src/vision/face_memory.py](src/vision/face_memory.py) | 백엔드 자동 선택: **sface**(YuNet+SFace ONNX, `DATA_DIR/models/`에 최초 1회 다운로드, DB `faces_sface.db`, cosine 0.363) / pixel fallback(`faces.db`, 0.88). `auto_track()` 매칭 시 seen_count++, 미매칭 시 `auto_NNN` + 썸네일 `DATA_DIR/faces/<name>.jpg`. `prune()` 1회성 노이즈 클러스터 정리. 이름 붙이기: 웹 UI 얼굴 라이브러리 / `robot_cli.py face-rename`. vision_task가 30초마다 cache reload. `DEFAULT_OWNER_MIN_SEEN=20` 이상 최다 cluster → "주인". 처음 보는 얼굴 → `new_face` 인사, 손님(seen≥3) → `face_recognize` 인사 |
 | 시간대 힌트 (식사/오후 슬럼프 등) | [src/brain/agent.py](src/brain/agent.py) `_time_hint()` | agent 프롬프트에 주입 |
 | 날씨 (OpenWeather) | [src/integrations/weather.py](src/integrations/weather.py) `WeatherClient` + `get_client()` 싱글톤 | `OPENWEATHER_API_KEY` 없으면 snapshot()→None (skip). `WEATHER_LAT/LON/LOCATION_NAME` env override. `BEHAVIOR.weather_cache_sec`(1800s) TTL + stale-while-error. agent `_tick`이 매번 await — 캐시 hit면 비용 0. `_build_situation_suffix(weather_line=...)` 한 줄 주입 |
 | 센서 이벤트 enum | [src/sensors/base.py](src/sensors/base.py) `SensorEventType` | |

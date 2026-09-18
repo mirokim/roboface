@@ -1,31 +1,51 @@
-"""얼굴 기억 — 등록된 사람 face embedding과 코사인 유사도로 매칭.
+"""얼굴 기억 — 사람별 face embedding DB + 코사인 유사도 매칭 + 썸네일 라이브러리.
 
-가벼운 첫 버전: 32×32 grayscale flatten + L2 normalize.
-정확도는 빛/각도에 약하지만 의존성 zero (numpy + opencv만). 추후 정확한
-face_recognition / dlib 기반으로 교체 가능.
+백엔드 두 가지 (자동 선택):
+- **sface** (기본): OpenCV YuNet(검출/정렬) + SFace(128-d 임베딩). 정확도 높음.
+  모델 ONNX 두 개를 DATA_DIR/models/에 두면 활성 (없으면 최초 1회 다운로드 시도).
+- **pixel** (fallback/테스트): Haar 검출 + 32×32 grayscale flatten. 의존성 zero.
 
-DB: SQLite (faces 테이블)
+DB: SQLite (faces 테이블). 백엔드가 바뀌면 임베딩 차원이 달라 호환 안 되므로
+DB 파일을 백엔드별로 분리한다 (faces.db=pixel, faces_sface.db=sface).
+썸네일: DATA_DIR/faces/<name>.jpg — 웹 UI 라이브러리에서 이름 붙이기용.
 """
 
 from __future__ import annotations
 
 import io
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.config import DATA_DIR
 from src.utils.logger import get_logger
 
 log = get_logger("face_memory")
 
+# ─── pixel 백엔드 ───
 EMBED_SIZE = 32  # 32×32 = 1024-d
-# 0.94 → 0.88: 같은 사람 자세/조명 변동 흡수. 다른 사람도 가끔 매칭 위험 ↑이지만
-# auto-tracking 누적 학습에선 가끔 misattribute보다 같은 사람 분리되는 게 더 나쁨
-# (주인 cluster가 여러 개로 쪼개져 seen_count 분산).
-MATCH_THRESHOLD = 0.88
+MATCH_THRESHOLD = 0.88          # pixel 백엔드 코사인 임계 (테스트/호환용 공개 상수)
 MIN_FACE_PX = 40
+
+# ─── sface 백엔드 ───
+MODELS_DIR = DATA_DIR / "models"
+YUNET_FILE = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
+SFACE_FILE = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
+# opencv_zoo는 Git LFS — raw.githubusercontent는 포인터 텍스트만 줌. media 호스트 사용.
+_ZOO = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
+_MODEL_URLS = {
+    YUNET_FILE: f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+    SFACE_FILE: f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+}
+SFACE_MATCH_THRESHOLD = 0.363   # OpenCV 권장 코사인 임계
+SFACE_CROP = (112, 112)         # alignCrop 출력 크기
+YUNET_SCORE = 0.7
+
+# 썸네일 라이브러리
+THUMBS_DIR = DATA_DIR / "faces"
 
 # auto_track 카운트 throttle — 같은 사람 N초 안엔 1번만 +1 (매 frame 카운트 방지)
 _AUTO_COUNT_THROTTLE_SEC = 10.0
@@ -34,12 +54,84 @@ DEFAULT_OWNER_MIN_SEEN = 20
 # auto cluster name prefix — explicit register와 구분
 AUTO_NAME_PREFIX = "auto_"
 
+_NAME_RE = re.compile(r"^[\w가-힣 .-]{1,32}$")
+
 
 @dataclass
 class FaceMatch:
     name: str
     confidence: float
 
+
+# ─── 모델 로딩 (lazy, 프로세스당 1회) ───
+
+_sface_state: dict[str, Any] = {"tried": False, "detector": None, "recognizer": None}
+
+
+def ensure_models(download: bool = True) -> bool:
+    """ONNX 모델 두 개 준비. 없으면 다운로드 시도(best-effort). 성공 여부 반환."""
+    if YUNET_FILE.exists() and SFACE_FILE.exists():
+        return True
+    if not download:
+        return False
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    import urllib.request
+    for path, url in _MODEL_URLS.items():
+        if path.exists():
+            continue
+        try:
+            log.info(f"face model 다운로드: {path.name}")
+            tmp = path.with_suffix(".part")
+            with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
+                f.write(r.read())
+            if tmp.stat().st_size < 100_000:      # LFS 포인터/에러 페이지 방어
+                tmp.unlink(missing_ok=True)
+                raise RuntimeError("파일이 너무 작음 (LFS 포인터?)")
+            tmp.replace(path)
+        except Exception as e:
+            log.warning(f"face model 다운로드 실패 ({path.name}): {e}")
+            return False
+    return YUNET_FILE.exists() and SFACE_FILE.exists()
+
+
+def _sface() -> tuple[Any, Any] | None:
+    """(YuNet detector, SFace recognizer) 또는 None (미가용)."""
+    st = _sface_state
+    if st["detector"] is not None:
+        return st["detector"], st["recognizer"]
+    if st["tried"]:
+        return None
+    st["tried"] = True
+    try:
+        import cv2
+        if not (hasattr(cv2, "FaceDetectorYN") and hasattr(cv2, "FaceRecognizerSF")):
+            return None
+        if not ensure_models(download=False):   # 다운로드는 vision_task 시작 시 명시적으로
+            return None
+        det = cv2.FaceDetectorYN.create(str(YUNET_FILE), "", (320, 320),
+                                        YUNET_SCORE, 0.3, 5000)
+        rec = cv2.FaceRecognizerSF.create(str(SFACE_FILE), "")
+        st["detector"], st["recognizer"] = det, rec
+        log.info("face_memory: sface 백엔드 활성 (YuNet + SFace)")
+        return det, rec
+    except Exception as e:
+        log.warning(f"sface 백엔드 초기화 실패 → pixel fallback: {e}")
+        return None
+
+
+def backend_name() -> str:
+    return "sface" if _sface() is not None else "pixel"
+
+
+def match_threshold() -> float:
+    return SFACE_MATCH_THRESHOLD if _sface() is not None else MATCH_THRESHOLD
+
+
+def default_db_path() -> Path:
+    return DATA_DIR / ("faces_sface.db" if _sface() is not None else "faces.db")
+
+
+# ─── DB ───
 
 def _ensure_db(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
@@ -73,8 +165,21 @@ def _blob_to_embedding(blob: bytes) -> Any:
     return np.load(io.BytesIO(blob))
 
 
+# ─── 임베딩 / 검출 ───
+
+def _is_aligned_crop(face_crop: Any) -> bool:
+    return (
+        getattr(face_crop, "ndim", 0) == 3
+        and tuple(face_crop.shape[:2]) == SFACE_CROP
+    )
+
+
 def compute_face_embedding(face_crop: Any) -> Any | None:
-    """face_crop: BGR/RGB numpy HxWx3 or HxW grayscale. → 1024-d L2-normalized vector."""
+    """face_crop → L2-normalized 벡터.
+
+    - sface: detect_face_crop이 만든 112×112×3 정렬 crop → 128-d
+    - pixel: 아무 crop(gray/RGB) → 1024-d
+    """
     if face_crop is None:
         return None
     try:
@@ -82,6 +187,17 @@ def compute_face_embedding(face_crop: Any) -> Any | None:
         import numpy as np
     except ImportError:
         return None
+    sf = _sface()
+    if sf is not None and _is_aligned_crop(face_crop):
+        _, rec = sf
+        try:
+            feat = rec.feature(face_crop).flatten().astype("float32")
+        except Exception as e:
+            log.debug(f"sface feature 실패: {e}")
+            return None
+        norm = float(np.linalg.norm(feat))
+        return feat / norm if norm > 1e-6 else None
+
     h, w = face_crop.shape[:2]
     if h < MIN_FACE_PX or w < MIN_FACE_PX:
         return None
@@ -92,7 +208,6 @@ def compute_face_embedding(face_crop: Any) -> Any | None:
     gray = cv2.equalizeHist(gray)  # 조명 변화에 약간 robust
     resized = cv2.resize(gray, (EMBED_SIZE, EMBED_SIZE), interpolation=cv2.INTER_AREA)
     vec = resized.astype("float32").flatten()
-    # 평균 0, L2 normalize
     vec -= float(vec.mean())
     norm = float(np.linalg.norm(vec))
     if norm < 1e-6:
@@ -104,7 +219,11 @@ def detect_face_crop(
     frame: Any,
     person_bbox: tuple[float, float, float, float] | None,
 ) -> Any | None:
-    """frame + bbox에서 얼굴 위치 찾고 grayscale crop 반환."""
+    """frame(RGB) + 사람 bbox(정규화)에서 얼굴 찾아 crop 반환.
+
+    sface: YuNet 검출 → alignCrop 112×112 BGR (임베딩 입력 규격)
+    pixel: Haar 검출 → grayscale crop
+    """
     if frame is None or person_bbox is None:
         return None
     try:
@@ -113,16 +232,36 @@ def detect_face_crop(
         return None
     h, w = frame.shape[:2]
     x0, y0, x1, y1 = person_bbox
-    upper_y1 = y0 + (y1 - y0) * 0.5
+    upper_y1 = y0 + (y1 - y0) * 0.65   # 상체 위쪽 — 얼굴은 여기 안에
     px0, py0 = int(max(0.0, x0) * w), int(max(0.0, y0) * h)
     px1 = int(min(1.0, x1) * w)
     py1 = int(min(1.0, upper_y1) * h)
     if px1 - px0 < MIN_FACE_PX or py1 - py0 < MIN_FACE_PX:
         return None
-
     roi = frame[py0:py1, px0:px1]
-    gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) if roi.ndim == 3 else roi
 
+    sf = _sface()
+    if sf is not None and roi.ndim == 3:
+        det, rec = sf
+        bgr = cv2.cvtColor(roi, cv2.COLOR_RGB2BGR)
+        try:
+            det.setInputSize((bgr.shape[1], bgr.shape[0]))
+            _, faces = det.detect(bgr)
+        except Exception as e:
+            log.debug(f"yunet detect 실패: {e}")
+            return None
+        if faces is None or len(faces) == 0:
+            return None
+        best = max(faces, key=lambda f: f[2] * f[3])
+        if best[2] < MIN_FACE_PX or best[3] < MIN_FACE_PX:
+            return None
+        try:
+            return rec.alignCrop(bgr, best)
+        except Exception as e:
+            log.debug(f"sface alignCrop 실패: {e}")
+            return None
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) if roi.ndim == 3 else roi
     classifier = cv2.CascadeClassifier(
         cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
@@ -132,15 +271,28 @@ def detect_face_crop(
                                         minSize=(40, 40))
     if len(faces) == 0:
         return None
-    # 가장 큰 face
     fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-    # 약간 padding
     pad = int(fw * 0.1)
     fx0 = max(0, fx - pad)
     fy0 = max(0, fy - pad)
     fx1 = min(gray.shape[1], fx + fw + pad)
     fy1 = min(gray.shape[0], fy + fh + pad)
     return gray[fy0:fy1, fx0:fx1]
+
+
+def _save_thumb(name: str, face_crop: Any) -> None:
+    """클러스터 썸네일 저장 (best-effort)."""
+    try:
+        import cv2
+        THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+        img = face_crop
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif not _is_aligned_crop(img):
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(str(THUMBS_DIR / f"{name}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    except Exception as e:
+        log.debug(f"thumb 저장 실패 ({name}): {e}")
 
 
 class FaceMemory:
@@ -168,7 +320,19 @@ class FaceMemory:
                 self._last_counted_at[name] = float(last_seen)
             except Exception as e:
                 log.warning(f"face DB row '{name}' 로드 실패: {e}")
-        log.info(f"face_memory: {len(self._cache)}명 로드")
+        log.info(f"face_memory: {len(self._cache)}명 로드 (backend={backend_name()})")
+
+    def _best(self, emb: Any) -> tuple[str, float]:
+        import numpy as np
+        best_name, best_sim = "", -1.0
+        for name, ref in self._cache:
+            if ref.shape != emb.shape:
+                continue   # 다른 백엔드 임베딩 — 비교 불가
+            sim = float(np.dot(emb, ref))
+            if sim > best_sim:
+                best_sim = sim
+                best_name = name
+        return best_name, best_sim
 
     def register(self, name: str, face_crop: Any) -> bool:
         """face_crop으로 embedding 계산 + DB 저장. 같은 이름이면 update."""
@@ -187,6 +351,7 @@ class FaceMemory:
         )
         self.conn.commit()
         self._load_cache()
+        _save_thumb(name, face_crop)
         log.info(f"face_memory: '{name}' 등록")
         return True
 
@@ -197,20 +362,9 @@ class FaceMemory:
         emb = compute_face_embedding(face_crop)
         if emb is None:
             return None
-        try:
-            import numpy as np
-        except ImportError:
+        best_name, best_sim = self._best(emb)
+        if best_sim < match_threshold():
             return None
-        best_name = ""
-        best_sim = -1.0
-        for name, ref in self._cache:
-            sim = float(np.dot(emb, ref))
-            if sim > best_sim:
-                best_sim = sim
-                best_name = name
-        if best_sim < MATCH_THRESHOLD:
-            return None
-        # last_seen 업데이트 (가벼움)
         try:
             self.conn.execute(
                 "UPDATE faces SET last_seen_at=? WHERE name=?",
@@ -224,36 +378,95 @@ class FaceMemory:
     def list_names(self) -> list[str]:
         return [n for n, _ in self._cache]
 
+    def list_people(self) -> list[dict[str, Any]]:
+        """라이브러리 뷰용 — name/seen_count/first/last/thumb 경로."""
+        cur = self.conn.execute(
+            "SELECT name, seen_count, created_at, last_seen_at FROM faces "
+            "ORDER BY seen_count DESC, id ASC"
+        )
+        out = []
+        for name, seen, created, last in cur:
+            thumb = THUMBS_DIR / f"{name}.jpg"
+            out.append({
+                "name": name, "seen_count": int(seen or 0),
+                "created_at": float(created), "last_seen_at": float(last),
+                "is_auto": name.startswith(AUTO_NAME_PREFIX),
+                "thumb": str(thumb) if thumb.exists() else None,
+            })
+        return out
+
+    def rename(self, old: str, new: str) -> bool:
+        """auto 클러스터에 이름 붙이기 (웹 UI). 이름 규칙 검증."""
+        new = new.strip()
+        if not _NAME_RE.match(new) or new.startswith(AUTO_NAME_PREFIX):
+            return False
+        try:
+            cur = self.conn.execute(
+                "UPDATE faces SET name=? WHERE name=?", (new, old),
+            )
+            self.conn.commit()
+            if cur.rowcount == 0:
+                return False
+        except sqlite3.IntegrityError:
+            return False
+        old_t, new_t = THUMBS_DIR / f"{old}.jpg", THUMBS_DIR / f"{new}.jpg"
+        if old_t.exists():
+            try:
+                old_t.replace(new_t)
+            except Exception:
+                pass
+        self._load_cache()
+        log.info(f"face_memory: '{old}' → '{new}' 이름 변경")
+        return True
+
+    def delete(self, name: str) -> bool:
+        cur = self.conn.execute("DELETE FROM faces WHERE name=?", (name,))
+        self.conn.commit()
+        t = THUMBS_DIR / f"{name}.jpg"
+        if t.exists():
+            try:
+                t.unlink()
+            except Exception:
+                pass
+        self._load_cache()
+        return cur.rowcount > 0
+
+    def prune(self, max_age_sec: float = 86400.0, min_seen: int = 2) -> int:
+        """노이즈 정리 — seen_count < min_seen 인 auto 클러스터가 max_age 지나면 삭제.
+
+        오검출/지나가던 사람 한 번 찍힌 것들이 DB를 채우는 걸 막는다.
+        """
+        cutoff = time.time() - max_age_sec
+        cur = self.conn.execute(
+            "SELECT name FROM faces WHERE name LIKE ? AND seen_count < ? "
+            "AND last_seen_at < ?",
+            (f"{AUTO_NAME_PREFIX}%", min_seen, cutoff),
+        )
+        names = [r[0] for r in cur]
+        for n in names:
+            self.delete(n)
+        if names:
+            log.info(f"face_memory: 노이즈 cluster {len(names)}개 정리")
+        return len(names)
+
     # ─── 자동 학습 (등장 빈도 누적) ───
 
     def auto_track(self, face_crop: Any) -> tuple[str, int] | None:
         """face_crop을 자동 cluster에 누적 학습.
 
         흐름:
-          1) 기존 cluster와 매칭 시도 (MATCH_THRESHOLD)
+          1) 기존 cluster와 매칭 시도 (match_threshold)
           2) 매칭되면 seen_count += 1 (단, _AUTO_COUNT_THROTTLE_SEC 안엔 skip)
-          3) 매칭 안 되면 새 "auto_N" cluster 생성 (seen_count=1)
+          3) 매칭 안 되면 새 "auto_N" cluster 생성 (seen_count=1) + 썸네일
 
         반환: (cluster_name, current_seen_count) 또는 None (embedding 실패).
-        cluster_name은 explicit name("미로") 또는 자동("auto_001").
         """
         emb = compute_face_embedding(face_crop)
         if emb is None:
             return None
-        try:
-            import numpy as np
-        except ImportError:
-            return None
-        # best 매칭
-        best_name, best_sim = "", -1.0
-        for name, ref in self._cache:
-            sim = float(np.dot(emb, ref))
-            if sim > best_sim:
-                best_sim = sim
-                best_name = name
+        best_name, best_sim = self._best(emb)
         now = time.time()
-        if best_sim >= MATCH_THRESHOLD:
-            # 기존 cluster — throttled count
+        if best_sim >= match_threshold():
             last_counted = self._last_counted_at.get(best_name, 0.0)
             if now - last_counted >= _AUTO_COUNT_THROTTLE_SEC:
                 try:
@@ -266,7 +479,6 @@ class FaceMemory:
                     self._last_counted_at[best_name] = now
                 except Exception as e:
                     log.warning(f"seen_count 업데이트 실패: {e}")
-            # 현재 count 읽어서 반환
             cur = self.conn.execute(
                 "SELECT seen_count FROM faces WHERE name = ?", (best_name,),
             )
@@ -274,7 +486,6 @@ class FaceMemory:
             count = int(row[0]) if row else 1
             return (best_name, count)
 
-        # 새 auto cluster — 다음 auto_N 번호 찾기
         cur = self.conn.execute(
             f"SELECT name FROM faces WHERE name LIKE '{AUTO_NAME_PREFIX}%'"
         )
@@ -295,6 +506,7 @@ class FaceMemory:
             )
             self.conn.commit()
             self._load_cache()
+            _save_thumb(new_name, face_crop)
             log.info(f"face_memory: 새 자동 cluster '{new_name}' 등록")
         except Exception as e:
             log.warning(f"새 auto cluster 생성 실패: {e}")
@@ -304,10 +516,7 @@ class FaceMemory:
     def get_owner(
         self, min_seen: int = DEFAULT_OWNER_MIN_SEEN,
     ) -> tuple[str, int] | None:
-        """가장 자주 등장한 cluster — (name, seen_count). min_seen 미만이면 None.
-
-        같은 count면 가장 오래된 cluster(낮은 id)가 우선.
-        """
+        """가장 자주 등장한 cluster — (name, seen_count). min_seen 미만이면 None."""
         cur = self.conn.execute(
             "SELECT name, seen_count FROM faces "
             "WHERE seen_count >= ? ORDER BY seen_count DESC, id ASC LIMIT 1",
