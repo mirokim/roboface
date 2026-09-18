@@ -143,6 +143,8 @@ async def run_vision(
     last_recognize_at = 0.0
     last_face_reload_at = time.time()
     last_face_match_at = 0.0
+    last_named_person: str | None = None
+    last_named_at = 0.0
     last_person_bbox: tuple[float, float, float, float] | None = None
     last_person_at = 0.0
     last_keypoints = None
@@ -637,6 +639,26 @@ async def run_vision(
                                 else:
                                     last_face_match_at = time.time()
                                     cluster_name, seen_count = tracked
+                                    # 연속성 병합: 프레임에 한 명뿐이고 직전(face_continuity_sec)
+                                    # 에 이름 있는 사람으로 인식됐다면, 지금 뜬 auto 클러스터는
+                                    # 같은 사람의 다른 각도 → 그 사람으로 흡수. 옆얼굴마다
+                                    # auto_NNN이 늘어나고 이름이 깜빡이는 걸 막는다.
+                                    if (cluster_name.startswith("auto_")
+                                            and last_named_person is not None
+                                            and time.time() - last_named_at
+                                            < BEHAVIOR.face_continuity_sec
+                                            and (perception is None
+                                                 or perception.person_count <= 1)):
+                                        try:
+                                            if face_memory.merge(cluster_name, last_named_person):
+                                                log.info(f"face: {cluster_name} → "
+                                                         f"{last_named_person} 연속성 병합")
+                                                cluster_name = last_named_person
+                                        except Exception as e:
+                                            log.debug(f"연속성 병합 실패: {e}")
+                                    if not cluster_name.startswith("auto_"):
+                                        last_named_person = cluster_name
+                                        last_named_at = time.time()
                                     owner = face_memory.get_owner()
                                     # 표시 이름 결정:
                                     #   1) explicit name(미로 등) — 그대로
