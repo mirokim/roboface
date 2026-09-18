@@ -335,6 +335,15 @@ def _build_chitchat_pool(
     if work_minutes is not None and work_minutes >= 45:
         pools.append(_CHITCHAT_WORK_LONG)
         pools.append(_CHITCHAT_WORK_LONG)
+    # 행동 기억 기반 멘트 ("어제는 9시에 왔는데", "3일 연속") — 있으면 가중치 2배
+    try:
+        from src.brain import behavior_memory
+        mem_pool = tuple(behavior_memory.remarks())
+    except Exception:
+        mem_pool = ()
+    if mem_pool:
+        pools.append(mem_pool)
+        pools.append(mem_pool)
     return tuple(pools)
 
 

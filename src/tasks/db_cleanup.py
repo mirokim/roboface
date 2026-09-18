@@ -54,12 +54,28 @@ def _cleanup_once() -> dict[str, int]:
     return deleted
 
 
+def _save_behavior_days() -> None:
+    """어제/오늘 행동 요약을 user_patterns에 저장 (로그 삭제 후에도 기억 유지)."""
+    from datetime import date, timedelta
+    from src.brain import behavior_memory
+    for d in (date.today() - timedelta(days=1), date.today()):
+        try:
+            behavior_memory.save_day(d)
+        except Exception as e:
+            log.debug(f"behavior day save 실패 ({d}): {e}")
+
+
 async def run_db_cleanup() -> None:
     log.info(f"db cleanup task 시작 — 매일 {CLEANUP_HOUR:02d}시 정리")
     last_cleanup_date: str | None = None
+    last_behavior_save = 0.0
     while True:
         await asyncio.sleep(CHECK_INTERVAL_SEC)
         now = datetime.now()
+        # 행동 요약은 30분마다 갱신 (재시작/정전으로 하루치 놓치지 않게)
+        if now.timestamp() - last_behavior_save > 1800:
+            last_behavior_save = now.timestamp()
+            await asyncio.get_running_loop().run_in_executor(None, _save_behavior_days)
         today_str = now.strftime("%Y-%m-%d")
         if last_cleanup_date == today_str:
             continue

@@ -241,6 +241,15 @@ def reappear_message(absence_sec: float, ctx: StateContext) -> str:
     else:
         pool = REAPPEAR_SHORT
     base = _pick_fresh(pool)
+    # 오랜만(10분+)이면 50%로 행동 기억 한마디 덧붙임 ("어제보다 일찍 왔네" 등)
+    if absence_sec >= 600 and random.random() < 0.5:
+        try:
+            from src.brain import behavior_memory
+            extra = behavior_memory.remarks()
+            if extra:
+                return name_pre + base + " " + random.choice(extra)
+        except Exception:
+            pass
     return name_pre + base
 
 

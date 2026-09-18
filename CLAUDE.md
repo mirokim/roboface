@@ -133,6 +133,7 @@ src/
 | 상태 → 기본 표정 | [src/brain/state_machine.py](src/brain/state_machine.py) `_DEFAULT_EXPRESSIONS` | |
 | 트리거 → 표정 | [src/brain/triggers.py](src/brain/triggers.py) `TRIGGER_EXPRESSIONS` | 누락 시 `expression_for()`가 KeyError |
 | 제스처 응답 멘트 | [src/brain/conversation_templates.py](src/brain/conversation_templates.py) `GESTURE_POOLS` | hands_up/nod/shake/gaze. wave는 behavior_speaker가 SSOT |
+| 행동 기억 (하루 요약 → "어제보다 늦었네") | [src/brain/behavior_memory.py](src/brain/behavior_memory.py) | conversation_log/work_sessions에서 하루 요약(등장/마지막/앉은 분/손인사·끄덕·발화 수)을 `user_patterns["behavior_day_<date>"]`에 저장(db_cleanup이 30분마다). `remarks()`가 어제/평소 비교·연속 출석·주간 손인사 멘트 → chitchat 풀 + 오랜만 인사에 섞임. `robot_cli.py history [days]` |
 | 시간대 분류 | [src/brain/time_of_day.py](src/brain/time_of_day.py) `period_for()` | morning/lunch/afternoon/evening/late |
 | 시스템 프롬프트(캐릭터 보이스) | [src/brain/conversation.py](src/brain/conversation.py) `SYSTEM_PROMPT` + [src/brain/agent.py](src/brain/agent.py) `_AGENT_SYSTEM` | agent용은 후자가 우선 |
 | 에이전트 도구 스키마 | [src/brain/agent.py](src/brain/agent.py) `_TOOLS` | speak/set_expression/dance/do_nothing/**recall**/**remember_fact** |

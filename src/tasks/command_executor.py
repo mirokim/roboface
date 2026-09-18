@@ -136,6 +136,10 @@ async def _execute(
         ctx.transition(new_state, face)
         return f"transition: {sname}"
 
+    if cmd == "history":
+        from src.brain import behavior_memory
+        return behavior_memory.history_text(int(args.get("days", 7)))
+
     if cmd == "look":
         # 서보 각도 직접 지정 (디버그/원격 조작). 소프트 리밋은 servos._clamp가 강제.
         if servos is None:

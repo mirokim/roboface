@@ -123,6 +123,8 @@ def main() -> int:
     sg = sub.add_parser("gesture", help="vision 우회해 sensor event emit")
     sg.add_argument("kind", choices=GESTURE_KINDS)
 
+    sh = sub.add_parser("history", help="최근 N일 행동 요약 (등장/앉은 시간/제스처)")
+    sh.add_argument("days", type=int, nargs="?", default=7)
     sub.add_parser("faces", help="얼굴 라이브러리 목록 (이름/횟수/최근)")
     sr = sub.add_parser("face-rename", help="auto_NNN 클러스터에 이름 붙이기")
     sr.add_argument("old"); sr.add_argument("new")
@@ -166,6 +168,8 @@ def main() -> int:
         return submit_and_report("transition", {"state": args.state}, wait)
     if args.cmd == "gesture":
         return submit_and_report("gesture", {"kind": args.kind}, wait)
+    if args.cmd == "history":
+        return submit_and_report("history", {"days": args.days}, True)
     if args.cmd == "faces":
         if not FACES_DB_PATH.exists():
             print(f"faces DB 없음: {FACES_DB_PATH}"); return 2
