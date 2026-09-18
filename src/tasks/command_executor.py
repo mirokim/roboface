@@ -136,6 +136,16 @@ async def _execute(
         ctx.transition(new_state, face)
         return f"transition: {sname}"
 
+    if cmd == "look":
+        # 서보 각도 직접 지정 (디버그/원격 조작). 소프트 리밋은 servos._clamp가 강제.
+        if servos is None:
+            raise RuntimeError("서보 없음")
+        cur = servos.position
+        pan = float(args.get("pan", cur.pan))
+        tilt = float(args.get("tilt", cur.tilt))
+        servos.set_angles(pan, tilt)
+        return f"look: pan={pan:.1f} tilt={tilt:.1f}"
+
     if cmd == "blink":
         trigger_blink(face.eye_state, time.time())
         return "blink"

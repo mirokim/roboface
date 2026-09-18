@@ -127,6 +127,10 @@ def main() -> int:
     sr = sub.add_parser("face-rename", help="auto_NNN 클러스터에 이름 붙이기")
     sr.add_argument("old"); sr.add_argument("new")
 
+    sl = sub.add_parser("look", help="서보 각도 직접 지정 (pan 45~225, tilt 50~130)")
+    sl.add_argument("--pan", type=float, default=None)
+    sl.add_argument("--tilt", type=float, default=None)
+
     sub.add_parser("blink")
     sub.add_parser("status", help="현재 상태 (--wait 자동)")
     sub.add_parser("expressions", help="사용 가능한 표정 목록")
@@ -203,6 +207,11 @@ def main() -> int:
             old_t.replace(thumbs / f"{args.new}.jpg")
         print(f"renamed {args.old} -> {args.new} (로봇은 30초 안에 반영)")
         return 0
+    if args.cmd == "look":
+        a = {}
+        if args.pan is not None: a["pan"] = args.pan
+        if args.tilt is not None: a["tilt"] = args.tilt
+        return submit_and_report("look", a, wait)
     if args.cmd == "blink":
         return submit_and_report("blink", {}, wait)
     if args.cmd == "status":
