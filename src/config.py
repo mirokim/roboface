@@ -248,6 +248,8 @@ class BehaviorConfig:
     # 얼굴 인식이 연속으로 이만큼 실패해야 user_name/last_recognized 클리어
     # (옆얼굴 한 번에 이름 깜빡임 방지)
     face_forget_sec: float = 15.0
+    # 부팅/재시작 후 이 시간 안엔 인사류(reappear/face_recognize/new_face) 생략
+    boot_greeting_grace_sec: float = 45.0
     # 이름 있는 사람 인식 후 이 시간 안에 뜬 auto 클러스터(한 명일 때)는 그 사람으로 병합
     face_continuity_sec: float = 20.0
 

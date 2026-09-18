@@ -16,7 +16,7 @@ from src.brain import memory
 from src.brain.state_machine import State, StateContext
 from src.brain.time_of_day import period_for
 from src.brain.triggers import _is_quiet_hours
-from src.config import SELF_TALK_DISABLED
+from src.config import BEHAVIOR, SELF_TALK_DISABLED
 from src.face.expressions import Expression
 from src.face.renderer import FaceState
 from src.utils.logger import get_logger
@@ -37,6 +37,8 @@ def _busy_state(ctx: StateContext) -> bool:
 # **수동적 인사**만 포함 (사용자 등장/인식 등). 사용자가 능동적으로 손 흔들거나
 # 만세 한 건 5분 cooldown 적용하면 너무 답답 — 거기는 kind별 짧은 cooldown만.
 _GREETING_KINDS = {"reappear", "face_recognize", "new_face"}
+# 프로세스 시작 시각 — 부팅/재시작 직후 인사 생략 판단용
+_BOOT_AT = time.time()
 
 # 사회적 반응 — SELF_TALK_DISABLED(원격 제어 모드)여도 통과.
 # 사람이 나타나거나 손 흔드는 것에 반응하는 건 "혼잣말"이 아니라 예의.
@@ -80,6 +82,10 @@ def say(
         return None
     now = time.time()
     if kind in _GREETING_KINDS:
+        # 재시작 직후 이미 앉아있던 사람에게 "왔네/보고 싶었어"는 어색 — grace 동안 skip
+        if now - _BOOT_AT < BEHAVIOR.boot_greeting_grace_sec:
+            log.debug(f"say skip [{kind}]: boot grace")
+            return None
         if ctx.last_greeting_at and now - ctx.last_greeting_at < 300.0:
             remain = 300.0 - (now - ctx.last_greeting_at)
             log.debug(f"say skip [{kind}]: greeting cooldown {remain:.0f}s 남음")
