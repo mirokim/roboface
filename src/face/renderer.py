@@ -135,7 +135,7 @@ def draw_face_to_surface(canvas: pygame.Surface, face: FaceState) -> None:
     eye_size = 80                              # 눈 지름(px)
     eye_offset = int(DISPLAY_WIDTH * 0.19)     # 중심에서 좌우 거리
     eye_y = 112
-    mouth_y = 182
+    mouth_y = 170
 
     # 말풍선 떠 있어도 얼굴 위치는 고정 — 위쪽에 덮어 그림
     speech_active = face.speech_text and now < face.speech_until
