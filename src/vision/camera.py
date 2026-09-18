@@ -167,7 +167,17 @@ class IMX500Camera:
     def _get_detections(self) -> list[Detection]:
         """현재 프레임에서 감지된 객체 리스트. 비동기 X — 동기 호출용."""
         try:
-            metadata = self.cam.capture_metadata()
+            # 메타데이터와 main 이미지를 한 request로 — 따로 capture_array()를
+            # 부르면 다음 프레임을 또 기다려 프레임당 ~47ms 손해 (fps 7 → 상한 고정).
+            req = self.cam.capture_request()
+            try:
+                metadata = req.get_metadata()
+                try:
+                    self._last_frame = req.make_array("main")
+                except Exception as e:
+                    log.debug(f"main frame 추출 실패: {e}")
+            finally:
+                req.release()
         except Exception as e:
             log.debug(f"메타데이터 캡처 실패: {e}")
             return []
@@ -323,16 +333,14 @@ class IMX500Camera:
             # 캡처 100ms + sleep 100ms = 5fps). 남은 시간이 없어도 0으로 양보.
             await asyncio.sleep(max(0.0, period - elapsed))
 
-    def get_main_frame(self):
-        """현재 main stream의 raw RGB 프레임 (HxWx3 numpy uint8) 또는 None.
+    _last_frame = None
 
-        wave_detector 같은 사후 분석용. detection metadata와는 별도 stream.
+    def get_main_frame(self):
+        """최근 detection과 같은 request의 main RGB 프레임 (HxWx3 uint8) 또는 None.
+
+        _get_detections에서 함께 추출해 둔 것을 반환 — 추가 캡처 대기 없음.
         """
-        try:
-            return self.cam.capture_array("main")
-        except Exception as e:
-            log.warning(f"capture_array 실패: {e}")
-            return None
+        return self._last_frame
 
     def close(self) -> None:
         try:
