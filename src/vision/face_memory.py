@@ -241,18 +241,28 @@ def detect_face_crop(
     roi = frame[py0:py1, px0:px1]
 
     sf = _sface()
-    if sf is not None and roi.ndim == 3:
+    if sf is not None and frame.ndim == 3:
+        # 전체 프레임에서 검출 → 사람 bbox 안(여유 포함)의 가장 큰 얼굴 선택.
+        # ROI만 잘라 넣으면 alignCrop이 ROI 밖을 검정으로 채워 임베딩이 망가짐.
         det, rec = sf
-        bgr = cv2.cvtColor(roi, cv2.COLOR_RGB2BGR)
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         try:
-            det.setInputSize((bgr.shape[1], bgr.shape[0]))
+            det.setInputSize((w, h))
             _, faces = det.detect(bgr)
         except Exception as e:
             log.debug(f"yunet detect 실패: {e}")
             return None
         if faces is None or len(faces) == 0:
             return None
-        best = max(faces, key=lambda f: f[2] * f[3])
+        mx0, my0 = max(0.0, x0 - 0.1) * w, max(0.0, y0 - 0.1) * h
+        mx1, my1 = min(1.0, x1 + 0.1) * w, min(1.0, upper_y1 + 0.1) * h
+        cands = [
+            f for f in faces
+            if mx0 <= f[0] + f[2] / 2 <= mx1 and my0 <= f[1] + f[3] / 2 <= my1
+        ]
+        if not cands:
+            return None
+        best = max(cands, key=lambda f: f[2] * f[3])
         if best[2] < MIN_FACE_PX or best[3] < MIN_FACE_PX:
             return None
         try:
